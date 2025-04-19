@@ -2,6 +2,7 @@ from tkinter import filedialog, messagebox
 import customtkinter
 from PIL import Image, ImageTk
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view  # Novo import
 
 # ===================== image processing functions =====================
 
@@ -42,7 +43,8 @@ def display_image(img, label):
 def toggle_inputs(event=None):
     operation = operations.get()
     constant_ops = ["Add Constant", "Subtract Constant",
-                    "Multiply by Constant", "Divide by Constant", "Thresholding"]
+                    "Multiply by Constant", "Divide by Constant", "Thresholding",
+                    "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter"]  # Filtros adicionados
     alpha_ops = ["Linear Blend"]
 
     constant_entry.configure(
@@ -186,6 +188,27 @@ def threshold_image(threshold):
     gray = rgb_to_grayscale() if len(image1_array.shape) == 3 else image1_array
     return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
+# Novos filtros espaciais
+
+
+def apply_filter(channel, kernel_size, filter_type):
+    pad = (kernel_size - 1) // 2
+    padded = np.pad(channel, pad, mode='symmetric')
+    windows = sliding_window_view(padded, (kernel_size, kernel_size))
+
+    if filter_type == 'max':
+        filtered = np.max(windows, axis=(2, 3))
+    elif filter_type == 'min':
+        filtered = np.min(windows, axis=(2, 3))
+    elif filter_type == 'mean':
+        filtered = np.mean(windows, axis=(2, 3))
+    elif filter_type == 'median':
+        filtered = np.median(windows, axis=(2, 3))
+    else:
+        raise ValueError("Invalid filter type")
+
+    return filtered.astype(np.uint8)
+
 # aux functions (expections/errors)
 
 
@@ -227,6 +250,23 @@ def apply_operation():
         elif operation == "Thresholding":
             threshold = int(constant) if constant else 127
             result = threshold_image(threshold)
+        elif operation in ["MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter"]:
+            kernel_size = int(constant) if constant else 3
+            if kernel_size % 2 == 0:
+                raise ValueError("Kernel size must be an odd integer")
+            validate_one_image()
+
+            filter_type = operation.split()[0].lower()
+
+            if len(image1_array.shape) == 3:
+                filtered = np.zeros_like(image1_array)
+                for c in range(3):
+                    filtered[:, :, c] = apply_filter(
+                        image1_array[:, :, c], kernel_size, filter_type)
+            else:
+                filtered = apply_filter(image1_array, kernel_size, filter_type)
+
+            result = filtered.astype(np.uint8)
         else:
             if "Add" in operation:
                 result = add_images() if "Images" in operation else apply_constant_operation(
@@ -365,7 +405,11 @@ operations = customtkinter.CTkOptionMenu(
         "XOR (Binary)",
         "NOT (Binary)",
         "Histogram Equalization",
-        "Thresholding"
+        "Thresholding",
+        "MAX Filter",      # Novo filtro
+        "MIN Filter",      # Novo filtro
+        "MEAN Filter",     # Novo filtro
+        "MEDIAN Filter"    # Novo filtro
     ],
     command=toggle_inputs
 )
