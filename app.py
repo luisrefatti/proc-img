@@ -2,15 +2,51 @@ from tkinter import filedialog, messagebox
 import customtkinter
 from PIL import Image, ImageTk
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view  # Novo import
+from numpy.lib.stride_tricks import sliding_window_view
 
 # ===================== image processing functions =====================
+
+
+def create_gaussian_kernel(size, sigma):
+    kernel = np.zeros((size, size))
+    center = size // 2
+    sum_val = 0.0
+
+    for i in range(size):
+        for j in range(size):
+            x, y = i - center, j - center
+            kernel[i, j] = np.exp(-(x**2 + y**2) / (2 * sigma**2))
+            sum_val += kernel[i, j]
+
+    # normalizing kernel
+    kernel /= sum_val
+    return kernel
+
+
+def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
+
+    if len(image.shape) == 3:  # color image
+        filtered = np.zeros_like(image)
+        for c in range(3):
+            filtered[:, :, c] = apply_gaussian_filter_manual(
+                image[:, :, c], sigma, kernel_size)
+        return filtered
+
+    kernel = create_gaussian_kernel(kernel_size, sigma)
+    pad = kernel_size // 2
+
+    padded = np.pad(image, pad, mode='symmetric')
+
+    windows = sliding_window_view(padded, (kernel_size, kernel_size))
+    filtered = np.sum(windows * kernel, axis=(2, 3))
+
+    return np.clip(filtered, 0, 255).astype(np.uint8)
 
 
 def load_image(img_num):
     global image1, image2, image1_array, image2_array
     file_path = filedialog.askopenfilename(filetypes=[
-        ("Image Files", "*.bmp *.jpg *.png *.jpeg")
+        ("Image Files", "*.bmp *.jpg *.png *.jpeg *.tif")
     ])
 
     if not file_path:
@@ -44,7 +80,8 @@ def toggle_inputs(event=None):
     operation = operations.get()
     constant_ops = ["Add Constant", "Subtract Constant",
                     "Multiply by Constant", "Divide by Constant", "Thresholding",
-                    "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter"]  # Filtros adicionados
+                    "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
+                    "ORDER Filter", "Conservative Smooth", "Gaussian Filter"]
     alpha_ops = ["Linear Blend"]
 
     constant_entry.configure(
@@ -180,7 +217,7 @@ def yuv_to_rgb(yuv):
     rgb[..., 2] = yuv[..., 0] + 2.03211 * yuv[..., 1]  # B
     return np.clip(rgb, 0, 255).astype(np.uint8)
 
-# thresold / limiarização
+# threshold / limiarização
 
 
 def threshold_image(threshold):
@@ -188,10 +225,10 @@ def threshold_image(threshold):
     gray = rgb_to_grayscale() if len(image1_array.shape) == 3 else image1_array
     return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
-# Novos filtros espaciais
+# spacial filters
 
 
-def apply_filter(channel, kernel_size, filter_type):
+def apply_filter(channel, kernel_size, filter_type, order_rank=None):
     pad = (kernel_size - 1) // 2
     padded = np.pad(channel, pad, mode='symmetric')
     windows = sliding_window_view(padded, (kernel_size, kernel_size))
@@ -204,6 +241,17 @@ def apply_filter(channel, kernel_size, filter_type):
         filtered = np.mean(windows, axis=(2, 3))
     elif filter_type == 'median':
         filtered = np.median(windows, axis=(2, 3))
+    elif filter_type == 'order':
+        sorted_windows = np.sort(windows.reshape(
+            *windows.shape[:2], windows.shape[2]*windows.shape[3]), axis=2)
+        filtered = sorted_windows[:, :, order_rank]
+    elif filter_type == 'conservative':
+        min_vals = np.min(windows, axis=(2, 3))
+        max_vals = np.max(windows, axis=(2, 3))
+        original = windows[:, :, pad, pad]
+        min_diff = np.abs(min_vals - original)
+        max_diff = np.abs(max_vals - original)
+        filtered = np.where(min_diff < max_diff, min_vals, max_vals)
     else:
         raise ValueError("Invalid filter type")
 
@@ -250,23 +298,58 @@ def apply_operation():
         elif operation == "Thresholding":
             threshold = int(constant) if constant else 127
             result = threshold_image(threshold)
-        elif operation in ["MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter"]:
-            kernel_size = int(constant) if constant else 3
+        elif operation in ["MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
+                           "ORDER Filter", "Conservative Smooth"]:
+            kernel_size = int(constant.split(',')[0]) if constant and ',' in constant else int(
+                constant) if constant else 3
             if kernel_size % 2 == 0:
                 raise ValueError("Kernel size must be an odd integer")
-            validate_one_image()
 
-            filter_type = operation.split()[0].lower()
+            order_rank = None
+            if operation == "ORDER Filter":
+                if constant and ',' in constant:
+                    try:
+                        parts = constant.split(',')
+                        if len(parts) == 2:
+                            kernel_size = int(parts[0])
+                            order_rank = int(parts[1])
+                            max_possible_rank = kernel_size * kernel_size - 1
+                            if order_rank < 0 or order_rank > max_possible_rank:
+                                raise ValueError(
+                                    f"Rank must be between 0 and {max_possible_rank}")
+                        else:
+                            raise ValueError("Invalid format")
+                    except ValueError:
+                        raise ValueError(
+                            "For ORDER Filter, use format: 'kernel_size,rank' (e.g., '3,4')")
+                else:
+                    raise ValueError(
+                        "For ORDER Filter, specify kernel size and rank (e.g., '3,4')")
+
+            validate_one_image()
+            filter_type = operation.split()[0].lower(
+            ) if operation != "Conservative Smooth" else 'conservative'
 
             if len(image1_array.shape) == 3:
                 filtered = np.zeros_like(image1_array)
                 for c in range(3):
                     filtered[:, :, c] = apply_filter(
-                        image1_array[:, :, c], kernel_size, filter_type)
+                        image1_array[:, :, c], kernel_size, filter_type, order_rank)
             else:
-                filtered = apply_filter(image1_array, kernel_size, filter_type)
+                filtered = apply_filter(
+                    image1_array, kernel_size, filter_type, order_rank)
 
             result = filtered.astype(np.uint8)
+        elif operation == "Gaussian Filter":
+            sigma = float(constant) if constant else 1.0
+            if sigma <= 0:
+                raise ValueError("Sigma must be greater than 0")
+
+            # auto kernel size based on sigma
+            kernel_size = min(15, 2 * int(3 * sigma) + 1)
+            validate_one_image()
+            result = apply_gaussian_filter_manual(
+                image1_array, sigma, kernel_size)
         else:
             if "Add" in operation:
                 result = add_images() if "Images" in operation else apply_constant_operation(
@@ -322,21 +405,18 @@ result_image = None
 image1_array = None
 image2_array = None
 
-# Cabeçalho
-app_name_label = customtkinter.CTkLabel(root,
-                                        text="Image Processing App",
+# header
+app_name_label = customtkinter.CTkLabel(root, text="Image Processing App",
                                         font=("Montserrat", 15, "bold"),
                                         text_color="#029cff")
 app_name_label.grid(row=0, column=1, padx=10, pady=10)
 
-app_pipe_label = customtkinter.CTkLabel(root,
-                                        text="|",
+app_pipe_label = customtkinter.CTkLabel(root, text="|",
                                         font=("Montserrat", 12),
                                         text_color="gray")
 app_pipe_label.grid(row=0, column=2, padx=10, pady=10)
 
-app_author_label = customtkinter.CTkLabel(root,
-                                          text="Created by Luis Fernando Refatti Boff",
+app_author_label = customtkinter.CTkLabel(root, text="Created by Luis Fernando Refatti Boff",
                                           font=("Montserrat", 12),
                                           text_color="white")
 app_author_label.grid(row=0, column=3, padx=10)
@@ -352,13 +432,11 @@ main_frame.grid_columnconfigure(0, weight=1)
 load_frame = customtkinter.CTkFrame(main_frame)
 load_frame.pack(pady=10, fill="x")
 
-btn_load1 = customtkinter.CTkButton(load_frame,
-                                    text="Load Image 1",
+btn_load1 = customtkinter.CTkButton(load_frame, text="Load Image 1",
                                     command=lambda: load_image(1))
 btn_load1.grid(row=0, column=0, padx=10)
 
-btn_load2 = customtkinter.CTkButton(load_frame,
-                                    text="Load Image 2",
+btn_load2 = customtkinter.CTkButton(load_frame, text="Load Image 2",
                                     command=lambda: load_image(2))
 btn_load2.grid(row=0, column=1, padx=10)
 
@@ -406,10 +484,13 @@ operations = customtkinter.CTkOptionMenu(
         "NOT (Binary)",
         "Histogram Equalization",
         "Thresholding",
-        "MAX Filter",      # Novo filtro
-        "MIN Filter",      # Novo filtro
-        "MEAN Filter",     # Novo filtro
-        "MEDIAN Filter"    # Novo filtro
+        "MAX Filter",
+        "MIN Filter",
+        "MEAN Filter",
+        "MEDIAN Filter",
+        "ORDER Filter",
+        "Conservative Smooth",
+        "Gaussian Filter"
     ],
     command=toggle_inputs
 )
@@ -419,18 +500,14 @@ constant_frame = customtkinter.CTkFrame(controls_frame)
 constant_frame.pack(side="left", padx=5)
 
 constant_label = customtkinter.CTkLabel(
-    constant_frame, text="Constant/Threshold:")
+    constant_frame, text="Constant/Threshold/Kernel/Sigma:")
 constant_label.pack(side="left")
 
 constant_entry = customtkinter.CTkEntry(
-    constant_frame,
-    width=120,
-    state="disabled"
-)
+    constant_frame, width=120, state="disabled")
 constant_entry.pack(side="left", padx=5)
 
-btn_apply = customtkinter.CTkButton(controls_frame,
-                                    text="Apply Operation",
+btn_apply = customtkinter.CTkButton(controls_frame, text="Apply Operation",
                                     command=apply_operation)
 btn_apply.pack(side="left", padx=10)
 
@@ -441,8 +518,7 @@ result_frame.pack(pady=20, fill="both", expand=True)
 result_label = customtkinter.CTkLabel(result_frame, text="Result Preview")
 result_label.pack(expand=True)
 
-btn_save = customtkinter.CTkButton(result_frame,
-                                   text="Save Result",
+btn_save = customtkinter.CTkButton(result_frame, text="Save Result",
                                    command=save_result)
 btn_save.pack(pady=10)
 
