@@ -18,14 +18,12 @@ def create_gaussian_kernel(size, sigma):
             kernel[i, j] = np.exp(-(x**2 + y**2) / (2 * sigma**2))
             sum_val += kernel[i, j]
 
-    # normalizing kernel
     kernel /= sum_val
     return kernel
 
 
 def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
-
-    if len(image.shape) == 3:  # color image
+    if len(image.shape) == 3:
         filtered = np.zeros_like(image)
         for c in range(3):
             filtered[:, :, c] = apply_gaussian_filter_manual(
@@ -34,12 +32,9 @@ def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
 
     kernel = create_gaussian_kernel(kernel_size, sigma)
     pad = kernel_size // 2
-
     padded = np.pad(image, pad, mode='symmetric')
-
     windows = sliding_window_view(padded, (kernel_size, kernel_size))
     filtered = np.sum(windows * kernel, axis=(2, 3))
-
     return np.clip(filtered, 0, 255).astype(np.uint8)
 
 
@@ -76,25 +71,84 @@ def display_image(img, label):
     label.image = photo
 
 
+# Operation groups structure
+OPERATION_GROUPS = {
+    "Arithmetic": {
+        "operations": [
+            "Add Images",
+            "Subtract Images",
+            "Add Constant",
+            "Subtract Constant",
+            "Multiply by Constant",
+            "Divide by Constant"
+        ],
+        "needs_constant": ["Add Constant", "Subtract Constant", "Multiply by Constant", "Divide by Constant"]
+    },
+    "Logic": {
+        "operations": ["AND", "OR", "XOR", "NOT"],
+        "needs_constant": []
+    },
+    "Geometric": {
+        "operations": ["Flip Horizontal", "Flip Vertical"],
+        "needs_constant": []
+    },
+    "Color": {
+        "operations": ["RGB to Grayscale", "Thresholding", "Histogram Equalization"],
+        "needs_constant": ["Thresholding"]
+    },
+    "Blending": {
+        "operations": ["Linear Blend", "Average Images"],
+        "needs_constant": ["Linear Blend"]
+    },
+    "Filters": {
+        "operations": [
+            "MAX Filter",
+            "MIN Filter",
+            "MEAN Filter",
+            "MEDIAN Filter",
+            "ORDER Filter",
+            "Conservative Smooth",
+            "Gaussian Filter"
+        ],
+        "needs_constant": [
+            "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
+            "ORDER Filter", "Conservative Smooth", "Gaussian Filter"
+        ]
+    }
+}
+
+
+def update_operations_dropdown(selected_group):
+    operations = OPERATION_GROUPS[selected_group]["operations"]
+    operations_dropdown.configure(values=operations)
+    operations_dropdown.set(operations[0] if operations else "")
+    toggle_inputs()
+
+
 def toggle_inputs(event=None):
-    operation = operations.get()
-    constant_ops = ["Add Constant", "Subtract Constant",
-                    "Multiply by Constant", "Divide by Constant", "Thresholding",
-                    "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
-                    "ORDER Filter", "Conservative Smooth", "Gaussian Filter"]
-    alpha_ops = ["Linear Blend"]
+    selected_group = groups_dropdown.get()
+    selected_operation = operations_dropdown.get()
 
-    constant_entry.configure(
-        state="normal" if operation in constant_ops else "disabled")
-    alpha_entry.configure(
-        state="normal" if operation in alpha_ops else "disabled")
+    constant_entry.configure(state="disabled")
+    alpha_entry.configure(state="disabled")
+    constant_entry.delete(0, 'end')
+    alpha_entry.delete(0, 'end')
 
-    if operation not in constant_ops:
-        constant_entry.delete(0, 'end')
-    if operation not in alpha_ops:
-        alpha_entry.delete(0, 'end')
+    if selected_group in OPERATION_GROUPS:
+        group_data = OPERATION_GROUPS[selected_group]
 
-# math operations
+        if selected_operation in group_data["needs_constant"]:
+            constant_entry.configure(state="normal")
+            if selected_operation == "Gaussian Filter":
+                constant_entry.insert(0, "1.0")
+            elif selected_operation == "ORDER Filter":
+                constant_entry.insert(0, "3,4")
+
+        if selected_group == "Blending" and selected_operation == "Linear Blend":
+            alpha_entry.configure(state="normal")
+            alpha_entry.insert(0, "0.5")
+
+# Math operations
 
 
 def add_images():
@@ -123,7 +177,7 @@ def apply_constant_operation(operation, value):
     elif operation == 'divide':
         return np.clip(image1_array.astype(float) / value, 0, 255).astype(np.uint8)
 
-# geometric operations
+# Geometric operations
 
 
 def flip_horizontal():
@@ -135,14 +189,14 @@ def flip_vertical():
     validate_one_image()
     return np.flipud(image1_array).copy()
 
-# color conversion
+# Color conversion
 
 
 def rgb_to_grayscale():
     validate_one_image()
     return np.dot(image1_array[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
 
-# blend operations
+# Blend operations
 
 
 def linear_blend(alpha):
@@ -153,7 +207,7 @@ def linear_blend(alpha):
 def average_images():
     return linear_blend(0.5)
 
-# logic operations
+# Logic operations
 
 
 def logical_operation(operation):
@@ -178,7 +232,7 @@ def binarize_image(img, threshold=127):
     gray = rgb_to_grayscale() if len(img.shape) == 3 else img
     return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
-# histogram equalization
+# Histogram equalization
 
 
 def histogram_equalization():
@@ -201,23 +255,22 @@ def equalize_channel(channel):
 def rgb_to_yuv(rgb):
     yuv = np.empty_like(rgb)
     yuv[..., 0] = 0.299 * rgb[..., 0] + 0.587 * \
-        rgb[..., 1] + 0.114 * rgb[..., 2]  # Y
-    yuv[..., 1] = -0.14713 * rgb[..., 0] - 0.28886 * \
-        rgb[..., 1] + 0.436 * rgb[..., 2]  # U
+        rgb[..., 1] + 0.114 * rgb[..., 2]
+    yuv[..., 1] = -0.14713 * rgb[..., 0] - \
+        0.28886 * rgb[..., 1] + 0.436 * rgb[..., 2]
     yuv[..., 2] = 0.615 * rgb[..., 0] - 0.51499 * \
-        rgb[..., 1] - 0.10001 * rgb[..., 2]  # V
+        rgb[..., 1] - 0.10001 * rgb[..., 2]
     return yuv
 
 
 def yuv_to_rgb(yuv):
     rgb = np.empty_like(yuv)
-    rgb[..., 0] = yuv[..., 0] + 1.13983 * yuv[..., 2]  # R
-    rgb[..., 1] = yuv[..., 0] - 0.39465 * \
-        yuv[..., 1] - 0.58060 * yuv[..., 2]  # G
-    rgb[..., 2] = yuv[..., 0] + 2.03211 * yuv[..., 1]  # B
+    rgb[..., 0] = yuv[..., 0] + 1.13983 * yuv[..., 2]
+    rgb[..., 1] = yuv[..., 0] - 0.39465 * yuv[..., 1] - 0.58060 * yuv[..., 2]
+    rgb[..., 2] = yuv[..., 0] + 2.03211 * yuv[..., 1]
     return np.clip(rgb, 0, 255).astype(np.uint8)
 
-# threshold / limiarização
+# Thresholding
 
 
 def threshold_image(threshold):
@@ -225,7 +278,7 @@ def threshold_image(threshold):
     gray = rgb_to_grayscale() if len(image1_array.shape) == 3 else image1_array
     return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
-# spacial filters
+# Spatial filters
 
 
 def apply_filter(channel, kernel_size, filter_type, order_rank=None):
@@ -257,7 +310,7 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
     return filtered.astype(np.uint8)
 
-# aux functions (expections/errors)
+# Validation functions
 
 
 def validate_one_image():
@@ -271,97 +324,101 @@ def validate_two_images():
     if image1_array.shape != image2_array.shape:
         raise ValueError("Images must have same dimensions")
 
+# Main operation handler
+
 
 def apply_operation():
     global result_image
-    operation = operations.get()
+    selected_group = groups_dropdown.get()
+    operation = operations_dropdown.get()
     constant = constant_entry.get()
 
     try:
-        if operation == "RGB to Grayscale":
-            result = rgb_to_grayscale()
-        elif operation == "Flip Horizontal":
-            result = flip_horizontal()
-        elif operation == "Flip Vertical":
-            result = flip_vertical()
-        elif operation == "Image Difference":
-            result = image_difference()
-        elif operation == "Linear Blend":
-            alpha = float(alpha_entry.get()) if alpha_entry.get() else 0.5
-            result = linear_blend(alpha)
-        elif operation == "Average Images":
-            result = average_images()
-        elif operation in ["AND (Binary)", "OR (Binary)", "XOR (Binary)", "NOT (Binary)"]:
-            result = logical_operation(operation.split()[0])
-        elif operation == "Histogram Equalization":
-            result = histogram_equalization()
-        elif operation == "Thresholding":
-            threshold = int(constant) if constant else 127
-            result = threshold_image(threshold)
-        elif operation in ["MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
-                           "ORDER Filter", "Conservative Smooth"]:
-            kernel_size = int(constant.split(',')[0]) if constant and ',' in constant else int(
-                constant) if constant else 3
-            if kernel_size % 2 == 0:
-                raise ValueError("Kernel size must be an odd integer")
+        if selected_group == "Select Category" or operation == "Select Operation":
+            raise ValueError("Please select both a category and an operation")
 
-            order_rank = None
-            if operation == "ORDER Filter":
-                if constant and ',' in constant:
-                    try:
-                        parts = constant.split(',')
-                        if len(parts) == 2:
-                            kernel_size = int(parts[0])
-                            order_rank = int(parts[1])
-                            max_possible_rank = kernel_size * kernel_size - 1
-                            if order_rank < 0 or order_rank > max_possible_rank:
-                                raise ValueError(
-                                    f"Rank must be between 0 and {max_possible_rank}")
-                        else:
-                            raise ValueError("Invalid format")
-                    except ValueError:
-                        raise ValueError(
-                            "For ORDER Filter, use format: 'kernel_size,rank' (e.g., '3,4')")
-                else:
-                    raise ValueError(
-                        "For ORDER Filter, specify kernel size and rank (e.g., '3,4')")
-
-            validate_one_image()
-            filter_type = operation.split()[0].lower(
-            ) if operation != "Conservative Smooth" else 'conservative'
-
-            if len(image1_array.shape) == 3:
-                filtered = np.zeros_like(image1_array)
-                for c in range(3):
-                    filtered[:, :, c] = apply_filter(
-                        image1_array[:, :, c], kernel_size, filter_type, order_rank)
+        # Group-based processing
+        if selected_group == "Arithmetic":
+            if "Images" in operation:
+                validate_two_images()
+                if operation == "Add Images":
+                    result = add_images()
+                elif operation == "Subtract Images":
+                    result = subtract_images()
             else:
-                filtered = apply_filter(
-                    image1_array, kernel_size, filter_type, order_rank)
+                validate_one_image()
+                op_type = operation.split()[0].lower()
+                value = float(constant) if constant else 0
+                result = apply_constant_operation(op_type, value)
 
-            result = filtered.astype(np.uint8)
-        elif operation == "Gaussian Filter":
-            sigma = float(constant) if constant else 1.0
-            if sigma <= 0:
-                raise ValueError("Sigma must be greater than 0")
+        elif selected_group == "Logic":
+            result = logical_operation(operation)
 
-            # auto kernel size based on sigma
-            kernel_size = min(15, 2 * int(3 * sigma) + 1)
+        elif selected_group == "Geometric":
             validate_one_image()
-            result = apply_gaussian_filter_manual(
-                image1_array, sigma, kernel_size)
-        else:
-            if "Add" in operation:
-                result = add_images() if "Images" in operation else apply_constant_operation(
-                    'add', float(constant))
-            elif "Subtract" in operation:
-                result = subtract_images() if "Images" in operation else apply_constant_operation(
-                    'subtract', float(constant))
-            elif "Multiply" in operation:
-                result = apply_constant_operation('multiply', float(constant))
-            elif "Divide" in operation:
-                result = apply_constant_operation('divide', float(constant))
+            if operation == "Flip Horizontal":
+                result = flip_horizontal()
+            elif operation == "Flip Vertical":
+                result = flip_vertical()
 
+        elif selected_group == "Color":
+            validate_one_image()
+            if operation == "RGB to Grayscale":
+                result = rgb_to_grayscale()
+            elif operation == "Thresholding":
+                threshold = int(constant) if constant else 127
+                result = threshold_image(threshold)
+            elif operation == "Histogram Equalization":
+                result = histogram_equalization()
+
+        elif selected_group == "Blending":
+            validate_two_images()
+            if operation == "Linear Blend":
+                alpha = float(alpha_entry.get()) if alpha_entry.get() else 0.5
+                result = linear_blend(alpha)
+            elif operation == "Average Images":
+                result = average_images()
+
+        elif selected_group == "Filters":
+            validate_one_image()
+            kernel_size = 3
+            order_rank = None
+            sigma = 1.0
+
+            if constant:
+                if operation == "Gaussian Filter":
+                    sigma = float(constant)
+                    kernel_size = min(15, 2 * int(3 * sigma) + 1)
+                elif operation == "ORDER Filter":
+                    parts = constant.split(',')
+                    if len(parts) == 2:
+                        kernel_size = int(parts[0])
+                        order_rank = int(parts[1])
+                    else:
+                        raise ValueError("Use 'kernel_size,rank' format")
+                else:
+                    kernel_size = int(constant)
+
+            filter_type = operation.split()[0].lower()
+            if filter_type == 'gaussian':
+                result = apply_gaussian_filter_manual(
+                    image1_array, sigma, kernel_size)
+            else:
+                if len(image1_array.shape) == 3:
+                    filtered = np.zeros_like(image1_array)
+                    for c in range(3):
+                        filtered[:, :, c] = apply_filter(
+                            image1_array[:, :, c], kernel_size,
+                            filter_type, order_rank
+                        )
+                else:
+                    filtered = apply_filter(
+                        image1_array, kernel_size,
+                        filter_type, order_rank
+                    )
+                result = filtered.astype(np.uint8)
+
+        # Display result
         if len(result.shape) == 2:
             result_image = Image.fromarray(result, 'L')
         else:
@@ -388,7 +445,7 @@ def save_result():
         messagebox.showinfo("Success", "Image saved successfully!")
 
 
-# ===================== gui =====================
+# ===================== GUI setup =====================
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("dark-blue")
 
@@ -399,36 +456,39 @@ root.geometry('1280x720')
 root.grid_rowconfigure(1, weight=1)
 root.grid_columnconfigure(0, weight=1)
 
+# Global variables
 image1 = None
 image2 = None
 result_image = None
 image1_array = None
 image2_array = None
 
-# header
-app_name_label = customtkinter.CTkLabel(root, text="Image Processing App",
+# Header
+header_frame = customtkinter.CTkFrame(root)
+header_frame.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="ew")
+
+app_name_label = customtkinter.CTkLabel(header_frame, text="Image Processing App",
                                         font=("Montserrat", 15, "bold"),
                                         text_color="#029cff")
-app_name_label.grid(row=0, column=1, padx=10, pady=10)
+app_name_label.pack(side="left", padx=10)
 
-app_pipe_label = customtkinter.CTkLabel(root, text="|",
-                                        font=("Montserrat", 12),
-                                        text_color="gray")
-app_pipe_label.grid(row=0, column=2, padx=10, pady=10)
+app_name_label = customtkinter.CTkLabel(header_frame, text=" | ",
+                                        font=("Montserrat", 15, "bold"),
+                                        text_color="#f2f2f2")
+app_name_label.pack(side="left", padx=10)
 
-app_author_label = customtkinter.CTkLabel(root, text="Created by Luis Fernando Refatti Boff",
+app_author_label = customtkinter.CTkLabel(header_frame, text="Created by Luis Fernando Refatti Boff",
                                           font=("Montserrat", 12),
                                           text_color="white")
-app_author_label.grid(row=0, column=3, padx=10)
+app_author_label.pack(side="left", padx=10)
 
-# main content
+# Main content
 main_frame = customtkinter.CTkFrame(root)
 main_frame.grid(row=1, column=0, columnspan=4, padx=20, pady=20, sticky="nsew")
-
 main_frame.grid_rowconfigure(0, weight=1)
 main_frame.grid_columnconfigure(0, weight=1)
 
-# load section
+# Load section
 load_frame = customtkinter.CTkFrame(main_frame)
 load_frame.pack(pady=10, fill="x")
 
@@ -440,7 +500,7 @@ btn_load2 = customtkinter.CTkButton(load_frame, text="Load Image 2",
                                     command=lambda: load_image(2))
 btn_load2.grid(row=0, column=1, padx=10)
 
-# preview
+# Image previews
 image_frame = customtkinter.CTkFrame(main_frame)
 image_frame.pack(pady=20, fill="both", expand=True)
 
@@ -450,9 +510,35 @@ img1_label.grid(row=0, column=0, padx=20, sticky="nsew")
 img2_label = customtkinter.CTkLabel(image_frame, text="Image 2 Preview")
 img2_label.grid(row=0, column=1, padx=20, sticky="nsew")
 
-# control
+# Controls
 controls_frame = customtkinter.CTkFrame(main_frame)
 controls_frame.pack(pady=10, fill="x")
+
+groups_dropdown = customtkinter.CTkOptionMenu(
+    controls_frame,
+    values=list(OPERATION_GROUPS.keys()),
+    command=update_operations_dropdown
+)
+groups_dropdown.set("Select Category")
+groups_dropdown.pack(side="left", padx=5)
+
+operations_dropdown = customtkinter.CTkOptionMenu(
+    controls_frame,
+    values=[],
+    command=toggle_inputs
+)
+operations_dropdown.set("Select Operation")
+operations_dropdown.pack(side="left", padx=5)
+
+constant_frame = customtkinter.CTkFrame(controls_frame)
+constant_frame.pack(side="left", padx=5)
+
+constant_label = customtkinter.CTkLabel(constant_frame, text="Parameter:")
+constant_label.pack(side="left")
+
+constant_entry = customtkinter.CTkEntry(
+    constant_frame, width=120, state="disabled")
+constant_entry.pack(side="left", padx=5)
 
 blend_frame = customtkinter.CTkFrame(controls_frame)
 blend_frame.pack(side="left", padx=5)
@@ -463,55 +549,11 @@ lbl_alpha.pack(side="left")
 alpha_entry = customtkinter.CTkEntry(blend_frame, width=50, state="disabled")
 alpha_entry.pack(side="left", padx=5)
 
-operations = customtkinter.CTkOptionMenu(
-    controls_frame,
-    values=[
-        "Add Images",
-        "Add Constant",
-        "Subtract Images",
-        "Subtract Constant",
-        "Multiply by Constant",
-        "Divide by Constant",
-        "RGB to Grayscale",
-        "Flip Horizontal",
-        "Flip Vertical",
-        "Image Difference",
-        "Linear Blend",
-        "Average Images",
-        "AND (Binary)",
-        "OR (Binary)",
-        "XOR (Binary)",
-        "NOT (Binary)",
-        "Histogram Equalization",
-        "Thresholding",
-        "MAX Filter",
-        "MIN Filter",
-        "MEAN Filter",
-        "MEDIAN Filter",
-        "ORDER Filter",
-        "Conservative Smooth",
-        "Gaussian Filter"
-    ],
-    command=toggle_inputs
-)
-operations.pack(side="left", padx=10)
-
-constant_frame = customtkinter.CTkFrame(controls_frame)
-constant_frame.pack(side="left", padx=5)
-
-constant_label = customtkinter.CTkLabel(
-    constant_frame, text="Constant/Threshold/Kernel/Sigma:")
-constant_label.pack(side="left")
-
-constant_entry = customtkinter.CTkEntry(
-    constant_frame, width=120, state="disabled")
-constant_entry.pack(side="left", padx=5)
-
 btn_apply = customtkinter.CTkButton(controls_frame, text="Apply Operation",
                                     command=apply_operation)
 btn_apply.pack(side="left", padx=10)
 
-# result
+# Result section
 result_frame = customtkinter.CTkFrame(main_frame)
 result_frame.pack(pady=20, fill="both", expand=True)
 
@@ -522,6 +564,8 @@ btn_save = customtkinter.CTkButton(result_frame, text="Save Result",
                                    command=save_result)
 btn_save.pack(pady=10)
 
+# Initial setup
+update_operations_dropdown(list(OPERATION_GROUPS.keys())[0])
 toggle_inputs()
 
 root.mainloop()
