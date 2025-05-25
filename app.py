@@ -3,8 +3,16 @@ import customtkinter
 from PIL import Image, ImageTk
 import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# ===================== image processing functions =====================
+# ===================== Font Configuration =====================
+FONT_FAMILY = "Montserrat"
+HEADER_FONT = (FONT_FAMILY, 14, "bold")
+SUBHEADER_FONT = (FONT_FAMILY, 12)
+BODY_FONT = (FONT_FAMILY, 12)
+
+# ===================== Image Processing Functions =====================
 
 
 def create_gaussian_kernel(size, sigma):
@@ -36,6 +44,65 @@ def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
     windows = sliding_window_view(padded, (kernel_size, kernel_size))
     filtered = np.sum(windows * kernel, axis=(2, 3))
     return np.clip(filtered, 0, 255).astype(np.uint8)
+
+# Edge Detection Functions
+
+
+def apply_prewitt(image):
+    if len(image.shape) == 3:
+        return np.stack([apply_prewitt(image[:, :, c]) for c in range(3)], axis=2)
+
+    kernel_x = np.array([[-1, 0, 1],
+                        [-1, 0, 1],
+                        [-1, 0, 1]])
+    kernel_y = np.array([[-1, -1, -1],
+                        [0, 0, 0],
+                        [1, 1, 1]])
+
+    padded = np.pad(image, 1, mode='reflect')
+    windows = sliding_window_view(padded, (3, 3))
+
+    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
+    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
+
+    gradient = np.sqrt(grad_x**2 + grad_y**2)
+    return np.clip(gradient, 0, 255).astype(np.uint8)
+
+
+def apply_sobel(image):
+    if len(image.shape) == 3:
+        return np.stack([apply_sobel(image[:, :, c]) for c in range(3)], axis=2)
+
+    kernel_x = np.array([[-1, 0, 1],
+                        [-2, 0, 2],
+                        [-1, 0, 1]])
+    kernel_y = np.array([[-1, -2, -1],
+                        [0, 0, 0],
+                        [1, 2, 1]])
+
+    padded = np.pad(image, 1, mode='reflect')
+    windows = sliding_window_view(padded, (3, 3))
+
+    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
+    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
+
+    gradient = np.sqrt(grad_x**2 + grad_y**2)
+    return np.clip(gradient, 0, 255).astype(np.uint8)
+
+
+def apply_laplacian(image):
+    if len(image.shape) == 3:
+        return np.stack([apply_laplacian(image[:, :, c]) for c in range(3)], axis=2)
+
+    kernel = np.array([[0, 1, 0],
+                      [1, -4, 1],
+                      [0, 1, 0]])
+
+    padded = np.pad(image, 1, mode='reflect')
+    windows = sliding_window_view(padded, (3, 3))
+
+    laplacian = np.sum(windows * kernel, axis=(2, 3))
+    return np.clip(np.abs(laplacian), 0, 255).astype(np.uint8)
 
 
 def load_image(img_num):
@@ -114,6 +181,10 @@ OPERATION_GROUPS = {
             "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
             "ORDER Filter", "Conservative Smooth", "Gaussian Filter"
         ]
+    },
+    "Edge Detection": {
+        "operations": ["Prewitt", "Sobel", "Laplacian"],
+        "needs_constant": []
     }
 }
 
@@ -237,12 +308,26 @@ def binarize_image(img, threshold=127):
 
 def histogram_equalization():
     validate_one_image()
-    if len(image1_array.shape) == 3:
-        yuv = rgb_to_yuv(image1_array)
-        yuv[:, :, 0] = equalize_channel(yuv[:, :, 0])
-        return yuv_to_rgb(yuv)
+    original = image1_array.copy()
+
+    if len(original.shape) == 3:
+        yuv = rgb_to_yuv(original)
+        y_channel = yuv[:, :, 0].copy()
+        equalized_y = equalize_channel(y_channel)
+
+        yuv[:, :, 0] = equalized_y
+        equalized = yuv_to_rgb(yuv)
+
+        original_gray = np.dot(original[..., :3], [
+                               0.299, 0.587, 0.114]).astype(np.uint8)
+        original_hist = np.histogram(original_gray.flatten(), 256, [0, 256])[0]
+        equalized_hist = np.histogram(equalized_y.flatten(), 256, [0, 256])[0]
     else:
-        return equalize_channel(image1_array)
+        equalized = equalize_channel(original)
+        original_hist = np.histogram(original.flatten(), 256, [0, 256])[0]
+        equalized_hist = np.histogram(equalized.flatten(), 256, [0, 256])[0]
+
+    return equalized.astype(np.uint8), original_hist, equalized_hist
 
 
 def equalize_channel(channel):
@@ -324,6 +409,42 @@ def validate_two_images():
     if image1_array.shape != image2_array.shape:
         raise ValueError("Images must have same dimensions")
 
+
+def display_histograms(original_hist, equalized_hist):
+    for widget in histograms_frame.winfo_children():
+        widget.destroy()
+
+    plt.style.use('dark_background')
+    fig = plt.figure(figsize=(10, 4), facecolor='#2b2b2b')
+    plt.subplots_adjust(wspace=0.3, left=0.1, right=0.95)
+
+    ax1 = fig.add_subplot(121)
+    ax1.bar(range(256), original_hist, width=1, color='#029cff')
+    ax1.set_title("Original Histogram", color='white', fontsize=10)
+    ax1.set_xlabel("Pixel Value", color='white')
+    ax1.set_ylabel("Frequency", color='white')
+    ax1.tick_params(colors='white')
+    ax1.grid(True, color='#404040', alpha=0.3)
+
+    ax2 = fig.add_subplot(122)
+    ax2.bar(range(256), equalized_hist, width=1, color='#ff029c')
+    ax2.set_title("Equalized Histogram", color='white', fontsize=10)
+    ax2.set_xlabel("Pixel Value", color='white')
+    ax2.tick_params(colors='white')
+    ax2.grid(True, color='#404040', alpha=0.3)
+
+    canvas = FigureCanvasTkAgg(fig, master=histograms_frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
+
+    btn_close = customtkinter.CTkButton(
+        histograms_frame,
+        text="Hide Histograms",
+        font=BODY_FONT,
+        command=lambda: [plt.close('all'), histograms_frame.pack_forget()]
+    )
+    btn_close.pack(pady=5)
+
 # Main operation handler
 
 
@@ -334,10 +455,13 @@ def apply_operation():
     constant = constant_entry.get()
 
     try:
+        if operation != "Histogram Equalization":
+            histograms_frame.pack_forget()
+            plt.close('all')
+
         if selected_group == "Select Category" or operation == "Select Operation":
             raise ValueError("Please select both a category and an operation")
 
-        # Group-based processing
         if selected_group == "Arithmetic":
             if "Images" in operation:
                 validate_two_images()
@@ -369,7 +493,9 @@ def apply_operation():
                 threshold = int(constant) if constant else 127
                 result = threshold_image(threshold)
             elif operation == "Histogram Equalization":
-                result = histogram_equalization()
+                result, orig_hist, eq_hist = histogram_equalization()
+                histograms_frame.pack(fill='both', expand=True, pady=10)
+                display_histograms(orig_hist, eq_hist)
 
         elif selected_group == "Blending":
             validate_two_images()
@@ -418,7 +544,15 @@ def apply_operation():
                     )
                 result = filtered.astype(np.uint8)
 
-        # Display result
+        elif selected_group == "Edge Detection":
+            validate_one_image()
+            if operation == "Prewitt":
+                result = apply_prewitt(image1_array)
+            elif operation == "Sobel":
+                result = apply_sobel(image1_array)
+            elif operation == "Laplacian":
+                result = apply_laplacian(image1_array)
+
         if len(result.shape) == 2:
             result_image = Image.fromarray(result, 'L')
         else:
@@ -445,13 +579,13 @@ def save_result():
         messagebox.showinfo("Success", "Image saved successfully!")
 
 
-# ===================== GUI setup =====================
+# ===================== GUI Setup =====================
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("dark-blue")
 
 root = customtkinter.CTk()
 root.title('Image Processing | by luisrefatti')
-root.geometry('1280x720')
+root.geometry('1280x900')
 
 root.grid_rowconfigure(1, weight=1)
 root.grid_columnconfigure(0, weight=1)
@@ -467,19 +601,20 @@ image2_array = None
 header_frame = customtkinter.CTkFrame(root)
 header_frame.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="ew")
 
-app_name_label = customtkinter.CTkLabel(header_frame, text="Image Processing App",
-                                        font=("Montserrat", 15, "bold"),
-                                        text_color="#029cff")
+app_name_label = customtkinter.CTkLabel(
+    header_frame,
+    text="Image Processing App",
+    font=HEADER_FONT,
+    text_color="#029cff"
+)
 app_name_label.pack(side="left", padx=10)
 
-app_name_label = customtkinter.CTkLabel(header_frame, text=" | ",
-                                        font=("Montserrat", 15, "bold"),
-                                        text_color="#f2f2f2")
-app_name_label.pack(side="left", padx=10)
-
-app_author_label = customtkinter.CTkLabel(header_frame, text="Created by Luis Fernando Refatti Boff",
-                                          font=("Montserrat", 12),
-                                          text_color="white")
+app_author_label = customtkinter.CTkLabel(
+    header_frame,
+    text="Created by Luis Fernando Refatti Boff",
+    font=SUBHEADER_FONT,
+    text_color="white"
+)
 app_author_label.pack(side="left", padx=10)
 
 # Main content
@@ -492,22 +627,38 @@ main_frame.grid_columnconfigure(0, weight=1)
 load_frame = customtkinter.CTkFrame(main_frame)
 load_frame.pack(pady=10, fill="x")
 
-btn_load1 = customtkinter.CTkButton(load_frame, text="Load Image 1",
-                                    command=lambda: load_image(1))
+btn_load1 = customtkinter.CTkButton(
+    load_frame,
+    text="Load Image 1",
+    font=BODY_FONT,
+    command=lambda: load_image(1)
+)
 btn_load1.grid(row=0, column=0, padx=10)
 
-btn_load2 = customtkinter.CTkButton(load_frame, text="Load Image 2",
-                                    command=lambda: load_image(2))
+btn_load2 = customtkinter.CTkButton(
+    load_frame,
+    text="Load Image 2",
+    font=BODY_FONT,
+    command=lambda: load_image(2)
+)
 btn_load2.grid(row=0, column=1, padx=10)
 
 # Image previews
 image_frame = customtkinter.CTkFrame(main_frame)
 image_frame.pack(pady=20, fill="both", expand=True)
 
-img1_label = customtkinter.CTkLabel(image_frame, text="Image 1 Preview")
+img1_label = customtkinter.CTkLabel(
+    image_frame,
+    text="Image 1 Preview",
+    font=BODY_FONT
+)
 img1_label.grid(row=0, column=0, padx=20, sticky="nsew")
 
-img2_label = customtkinter.CTkLabel(image_frame, text="Image 2 Preview")
+img2_label = customtkinter.CTkLabel(
+    image_frame,
+    text="Image 2 Preview",
+    font=BODY_FONT
+)
 img2_label.grid(row=0, column=1, padx=20, sticky="nsew")
 
 # Controls
@@ -516,6 +667,7 @@ controls_frame.pack(pady=10, fill="x")
 
 groups_dropdown = customtkinter.CTkOptionMenu(
     controls_frame,
+    font=BODY_FONT,
     values=list(OPERATION_GROUPS.keys()),
     command=update_operations_dropdown
 )
@@ -524,6 +676,7 @@ groups_dropdown.pack(side="left", padx=5)
 
 operations_dropdown = customtkinter.CTkOptionMenu(
     controls_frame,
+    font=BODY_FONT,
     values=[],
     command=toggle_inputs
 )
@@ -533,35 +686,68 @@ operations_dropdown.pack(side="left", padx=5)
 constant_frame = customtkinter.CTkFrame(controls_frame)
 constant_frame.pack(side="left", padx=5)
 
-constant_label = customtkinter.CTkLabel(constant_frame, text="Parameter:")
+constant_label = customtkinter.CTkLabel(
+    constant_frame,
+    text="Parameter:",
+    font=BODY_FONT
+)
 constant_label.pack(side="left")
 
 constant_entry = customtkinter.CTkEntry(
-    constant_frame, width=120, state="disabled")
+    constant_frame,
+    width=120,
+    font=BODY_FONT,
+    state="disabled"
+)
 constant_entry.pack(side="left", padx=5)
 
 blend_frame = customtkinter.CTkFrame(controls_frame)
 blend_frame.pack(side="left", padx=5)
 
-lbl_alpha = customtkinter.CTkLabel(blend_frame, text="Alpha:")
+lbl_alpha = customtkinter.CTkLabel(
+    blend_frame,
+    text="Alpha:",
+    font=BODY_FONT
+)
 lbl_alpha.pack(side="left")
 
-alpha_entry = customtkinter.CTkEntry(blend_frame, width=50, state="disabled")
+alpha_entry = customtkinter.CTkEntry(
+    blend_frame,
+    width=50,
+    font=BODY_FONT,
+    state="disabled"
+)
 alpha_entry.pack(side="left", padx=5)
 
-btn_apply = customtkinter.CTkButton(controls_frame, text="Apply Operation",
-                                    command=apply_operation)
+btn_apply = customtkinter.CTkButton(
+    controls_frame,
+    text="Apply Operation",
+    font=BODY_FONT,
+    command=apply_operation
+)
 btn_apply.pack(side="left", padx=10)
 
 # Result section
 result_frame = customtkinter.CTkFrame(main_frame)
 result_frame.pack(pady=20, fill="both", expand=True)
 
-result_label = customtkinter.CTkLabel(result_frame, text="Result Preview")
+result_label = customtkinter.CTkLabel(
+    result_frame,
+    text="Result Preview",
+    font=BODY_FONT
+)
 result_label.pack(expand=True)
 
-btn_save = customtkinter.CTkButton(result_frame, text="Save Result",
-                                   command=save_result)
+# Histograms frame
+histograms_frame = customtkinter.CTkFrame(main_frame)
+
+# Save button
+btn_save = customtkinter.CTkButton(
+    result_frame,
+    text="Save Result",
+    font=BODY_FONT,
+    command=save_result
+)
 btn_save.pack(pady=10)
 
 # Initial setup
