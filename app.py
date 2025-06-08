@@ -185,6 +185,18 @@ OPERATION_GROUPS = {
     "Edge Detection": {
         "operations": ["Prewitt", "Sobel", "Laplacian"],
         "needs_constant": []
+    },
+    "Morphological": {
+        "operations": [
+            "Dilation",
+            "Erosion",
+            "Opening",
+            "Closing",
+            "Contour"
+        ],
+        "needs_constant": [
+            "Dilation", "Erosion", "Opening", "Closing", "Contour"
+        ]
     }
 }
 
@@ -210,14 +222,9 @@ def toggle_inputs(event=None):
 
         if selected_operation in group_data["needs_constant"]:
             constant_entry.configure(state="normal")
-            if selected_operation == "Gaussian Filter":
-                constant_entry.insert(0, "1.0")
-            elif selected_operation == "ORDER Filter":
-                constant_entry.insert(0, "3,4")
 
         if selected_group == "Blending" and selected_operation == "Linear Blend":
             alpha_entry.configure(state="normal")
-            alpha_entry.insert(0, "0.5")
 
 # Math operations
 
@@ -395,7 +402,77 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
     return filtered.astype(np.uint8)
 
-# Validation functions
+# Morphological operations ===============================================
+
+
+def prepare_binary_image(image):
+    """Converts image to binary if needed and ensures uint8 type"""
+    if len(image.shape) == 3:  # Color image
+        binary = binarize_image(image)
+    else:
+        if np.max(image) > 1:  # Grayscale image
+            binary = np.where(image > 127, 255, 0).astype(np.uint8)
+        else:  # Already binary (0 and 1)
+            binary = (image * 255).astype(np.uint8)
+    return binary
+
+
+def apply_morph_operation(image, kernel_size, operation):
+    """Applies morphological operation using a sliding window"""
+    # Prepare binary image
+    bin_img = prepare_binary_image(image)
+    bin_img_01 = (bin_img // 255).astype(np.uint8)  # Convert to 0 and 1
+
+    # Create structuring element
+    pad = kernel_size // 2
+    padded = np.pad(bin_img_01, pad, mode='constant', constant_values=0)
+    windows = sliding_window_view(padded, (kernel_size, kernel_size))
+
+    if operation == 'dilation':
+        result = np.max(windows, axis=(2, 3))
+    elif operation == 'erosion':
+        result = np.min(windows, axis=(2, 3))
+    else:
+        raise ValueError("Invalid morphological operation")
+
+    return (result * 255).astype(np.uint8)
+
+
+def apply_dilation(image, kernel_size=3):
+    """Applies morphological dilation"""
+    return apply_morph_operation(image, kernel_size, 'dilation')
+
+
+def apply_erosion(image, kernel_size=3):
+    """Applies morphological erosion"""
+    return apply_morph_operation(image, kernel_size, 'erosion')
+
+
+def apply_opening(image, kernel_size=3):
+    """Morphological opening: erosion followed by dilation"""
+    eroded = apply_erosion(image, kernel_size)
+    return apply_dilation(eroded, kernel_size)
+
+
+def apply_closing(image, kernel_size=3):
+    """Morphological closing: dilation followed by erosion"""
+    dilated = apply_dilation(image, kernel_size)
+    return apply_erosion(dilated, kernel_size)
+
+
+def apply_contour(image, kernel_size=3):
+    """Contour detection: difference between original and eroded image"""
+    # Prepare binary image
+    bin_img = prepare_binary_image(image)
+
+    # Apply erosion
+    eroded = apply_erosion(bin_img, kernel_size)
+
+    # Calculate contour: original - eroded
+    contour = np.where(bin_img > eroded, 255, 0).astype(np.uint8)
+    return contour
+
+# Validation functions ==================================================
 
 
 def validate_one_image():
@@ -410,12 +487,15 @@ def validate_two_images():
         raise ValueError("Images must have same dimensions")
 
 
-def display_histograms(original_hist, equalized_hist):
-    for widget in histograms_frame.winfo_children():
-        widget.destroy()
+def show_histogram_modal(original_hist, equalized_hist):
+    # Create a new window for histograms
+    hist_window = customtkinter.CTkToplevel()
+    hist_window.title("Histogram Comparison")
+    hist_window.geometry("800x500")
+    hist_window.grab_set()  # Make it modal
 
     plt.style.use('dark_background')
-    fig = plt.figure(figsize=(10, 4), facecolor='#2b2b2b')
+    fig = plt.figure(figsize=(8, 4), facecolor='#2b2b2b')
     plt.subplots_adjust(wspace=0.3, left=0.1, right=0.95)
 
     ax1 = fig.add_subplot(121)
@@ -433,19 +513,21 @@ def display_histograms(original_hist, equalized_hist):
     ax2.tick_params(colors='white')
     ax2.grid(True, color='#404040', alpha=0.3)
 
-    canvas = FigureCanvasTkAgg(fig, master=histograms_frame)
+    # Embed the plot in the Toplevel window
+    canvas = FigureCanvasTkAgg(fig, master=hist_window)
     canvas.draw()
     canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 
+    # Close button
     btn_close = customtkinter.CTkButton(
-        histograms_frame,
-        text="Hide Histograms",
+        hist_window,
+        text="Close",
         font=BODY_FONT,
-        command=lambda: [plt.close('all'), histograms_frame.pack_forget()]
+        command=lambda: [plt.close('all'), hist_window.destroy()]
     )
-    btn_close.pack(pady=5)
+    btn_close.pack(pady=10)
 
-# Main operation handler
+# Main operation handler ================================================
 
 
 def apply_operation():
@@ -453,12 +535,9 @@ def apply_operation():
     selected_group = groups_dropdown.get()
     operation = operations_dropdown.get()
     constant = constant_entry.get()
+    alpha_val = alpha_entry.get()
 
     try:
-        if operation != "Histogram Equalization":
-            histograms_frame.pack_forget()
-            plt.close('all')
-
         if selected_group == "Select Category" or operation == "Select Operation":
             raise ValueError("Please select both a category and an operation")
 
@@ -472,7 +551,9 @@ def apply_operation():
             else:
                 validate_one_image()
                 op_type = operation.split()[0].lower()
-                value = float(constant) if constant else 0
+                if not constant:
+                    raise ValueError("Constant value is required")
+                value = float(constant)
                 result = apply_constant_operation(op_type, value)
 
         elif selected_group == "Logic":
@@ -490,40 +571,45 @@ def apply_operation():
             if operation == "RGB to Grayscale":
                 result = rgb_to_grayscale()
             elif operation == "Thresholding":
-                threshold = int(constant) if constant else 127
+                if not constant:
+                    raise ValueError("Threshold value is required")
+                threshold = int(constant)
                 result = threshold_image(threshold)
             elif operation == "Histogram Equalization":
                 result, orig_hist, eq_hist = histogram_equalization()
-                histograms_frame.pack(fill='both', expand=True, pady=10)
-                display_histograms(orig_hist, eq_hist)
+                # Show histogram modal only for this operation
+                show_histogram_modal(orig_hist, eq_hist)
 
         elif selected_group == "Blending":
             validate_two_images()
             if operation == "Linear Blend":
-                alpha = float(alpha_entry.get()) if alpha_entry.get() else 0.5
+                if not alpha_val:
+                    raise ValueError("Alpha value is required")
+                alpha = float(alpha_val)
                 result = linear_blend(alpha)
             elif operation == "Average Images":
                 result = average_images()
 
         elif selected_group == "Filters":
             validate_one_image()
+            if not constant:
+                raise ValueError("Kernel size is required")
+
             kernel_size = 3
             order_rank = None
             sigma = 1.0
 
-            if constant:
-                if operation == "Gaussian Filter":
-                    sigma = float(constant)
-                    kernel_size = min(15, 2 * int(3 * sigma) + 1)
-                elif operation == "ORDER Filter":
-                    parts = constant.split(',')
-                    if len(parts) == 2:
-                        kernel_size = int(parts[0])
-                        order_rank = int(parts[1])
-                    else:
-                        raise ValueError("Use 'kernel_size,rank' format")
-                else:
-                    kernel_size = int(constant)
+            if operation == "Gaussian Filter":
+                sigma = float(constant)
+                kernel_size = min(15, 2 * int(3 * sigma) + 1)
+            elif operation == "ORDER Filter":
+                parts = constant.split(',')
+                if len(parts) != 2:
+                    raise ValueError("Use 'kernel_size,rank' format")
+                kernel_size = int(parts[0])
+                order_rank = int(parts[1])
+            else:
+                kernel_size = int(constant)
 
             filter_type = operation.split()[0].lower()
             if filter_type == 'gaussian':
@@ -544,6 +630,24 @@ def apply_operation():
                     )
                 result = filtered.astype(np.uint8)
 
+        # ========== MORPHOLOGICAL OPERATIONS ==========
+        elif selected_group == "Morphological":
+            validate_one_image()
+            if not constant:
+                raise ValueError("Kernel size is required")
+            kernel_size = int(constant)
+
+            if operation == "Dilation":
+                result = apply_dilation(image1_array, kernel_size)
+            elif operation == "Erosion":
+                result = apply_erosion(image1_array, kernel_size)
+            elif operation == "Opening":
+                result = apply_opening(image1_array, kernel_size)
+            elif operation == "Closing":
+                result = apply_closing(image1_array, kernel_size)
+            elif operation == "Contour":
+                result = apply_contour(image1_array, kernel_size)
+
         elif selected_group == "Edge Detection":
             validate_one_image()
             if operation == "Prewitt":
@@ -553,11 +657,11 @@ def apply_operation():
             elif operation == "Laplacian":
                 result = apply_laplacian(image1_array)
 
+        # Handle result display
         if len(result.shape) == 2:
             result_image = Image.fromarray(result, 'L')
         else:
             result_image = Image.fromarray(result)
-
         display_image(result_image, result_label)
 
     except Exception as e:
@@ -737,9 +841,6 @@ result_label = customtkinter.CTkLabel(
     font=BODY_FONT
 )
 result_label.pack(expand=True)
-
-# Histograms frame
-histograms_frame = customtkinter.CTkFrame(main_frame)
 
 # Save button
 btn_save = customtkinter.CTkButton(
