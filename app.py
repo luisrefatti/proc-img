@@ -73,12 +73,12 @@ def apply_sobel(image):
     if len(image.shape) == 3:
         return np.stack([apply_sobel(image[:, :, c]) for c in range(3)], axis=2)
 
-    kernel_x = np.array([[-1, 0, 1],
-                        [-2, 0, 2],
-                        [-1, 0, 1]])
-    kernel_y = np.array([[-1, -2, -1],
+    kernel_x = np.array([[1, 0, -1],
+                        [2, 0, -2],
+                        [1, 0, -1]])
+    kernel_y = np.array([[1, 2, 1],
                         [0, 0, 0],
-                        [1, 2, 1]])
+                        [-1, -2, -1]])
 
     padded = np.pad(image, 1, mode='reflect')
     windows = sliding_window_view(padded, (3, 3))
@@ -406,22 +406,20 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
 
 def prepare_binary_image(image):
-    """Converts image to binary if needed and ensures uint8 type"""
     if len(image.shape) == 3:  # Color image
         binary = binarize_image(image)
     else:
         if np.max(image) > 1:  # Grayscale image
             binary = np.where(image > 127, 255, 0).astype(np.uint8)
-        else:  # Already binary (0 and 1)
+        else:
             binary = (image * 255).astype(np.uint8)
     return binary
 
 
 def apply_morph_operation(image, kernel_size, operation):
-    """Applies morphological operation using a sliding window"""
     # Prepare binary image
     bin_img = prepare_binary_image(image)
-    bin_img_01 = (bin_img // 255).astype(np.uint8)  # Convert to 0 and 1
+    bin_img_01 = (bin_img // 255).astype(np.uint8)
 
     # Create structuring element
     pad = kernel_size // 2
@@ -439,36 +437,28 @@ def apply_morph_operation(image, kernel_size, operation):
 
 
 def apply_dilation(image, kernel_size=3):
-    """Applies morphological dilation"""
     return apply_morph_operation(image, kernel_size, 'dilation')
 
 
 def apply_erosion(image, kernel_size=3):
-    """Applies morphological erosion"""
     return apply_morph_operation(image, kernel_size, 'erosion')
 
 
 def apply_opening(image, kernel_size=3):
-    """Morphological opening: erosion followed by dilation"""
     eroded = apply_erosion(image, kernel_size)
     return apply_dilation(eroded, kernel_size)
 
 
 def apply_closing(image, kernel_size=3):
-    """Morphological closing: dilation followed by erosion"""
     dilated = apply_dilation(image, kernel_size)
     return apply_erosion(dilated, kernel_size)
 
 
 def apply_contour(image, kernel_size=3):
-    """Contour detection: difference between original and eroded image"""
-    # Prepare binary image
     bin_img = prepare_binary_image(image)
 
-    # Apply erosion
     eroded = apply_erosion(bin_img, kernel_size)
 
-    # Calculate contour: original - eroded
     contour = np.where(bin_img > eroded, 255, 0).astype(np.uint8)
     return contour
 
@@ -488,11 +478,10 @@ def validate_two_images():
 
 
 def show_histogram_modal(original_hist, equalized_hist):
-    # Create a new window for histograms
     hist_window = customtkinter.CTkToplevel()
     hist_window.title("Histogram Comparison")
     hist_window.geometry("800x500")
-    hist_window.grab_set()  # Make it modal
+    hist_window.grab_set()
 
     plt.style.use('dark_background')
     fig = plt.figure(figsize=(8, 4), facecolor='#2b2b2b')
@@ -507,18 +496,16 @@ def show_histogram_modal(original_hist, equalized_hist):
     ax1.grid(True, color='#404040', alpha=0.3)
 
     ax2 = fig.add_subplot(122)
-    ax2.bar(range(256), equalized_hist, width=1, color='#ff029c')
+    ax2.bar(range(256), equalized_hist, width=1, color="#ff7802")
     ax2.set_title("Equalized Histogram", color='white', fontsize=10)
     ax2.set_xlabel("Pixel Value", color='white')
     ax2.tick_params(colors='white')
     ax2.grid(True, color='#404040', alpha=0.3)
 
-    # Embed the plot in the Toplevel window
     canvas = FigureCanvasTkAgg(fig, master=hist_window)
     canvas.draw()
     canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 
-    # Close button
     btn_close = customtkinter.CTkButton(
         hist_window,
         text="Close",
@@ -577,7 +564,6 @@ def apply_operation():
                 result = threshold_image(threshold)
             elif operation == "Histogram Equalization":
                 result, orig_hist, eq_hist = histogram_equalization()
-                # Show histogram modal only for this operation
                 show_histogram_modal(orig_hist, eq_hist)
 
         elif selected_group == "Blending":
