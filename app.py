@@ -6,137 +6,11 @@ from numpy.lib.stride_tricks import sliding_window_view
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# ===================== Font Configuration =====================
+# ===================== FONT CONFIGURATION =====================
 FONT_FAMILY = "Montserrat"
 HEADER_FONT = (FONT_FAMILY, 14, "bold")
 SUBHEADER_FONT = (FONT_FAMILY, 12)
 BODY_FONT = (FONT_FAMILY, 12)
-
-# ===================== Image Processing Functions =====================
-
-
-def create_gaussian_kernel(size, sigma):
-    kernel = np.zeros((size, size))
-    center = size // 2
-    sum_val = 0.0
-
-    for i in range(size):
-        for j in range(size):
-            x, y = i - center, j - center
-            kernel[i, j] = np.exp(-(x**2 + y**2) / (2 * sigma**2))
-            sum_val += kernel[i, j]
-
-    kernel /= sum_val
-    return kernel
-
-
-def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
-    if len(image.shape) == 3:
-        filtered = np.zeros_like(image)
-        for c in range(3):
-            filtered[:, :, c] = apply_gaussian_filter_manual(
-                image[:, :, c], sigma, kernel_size)
-        return filtered
-
-    kernel = create_gaussian_kernel(kernel_size, sigma)
-    pad = kernel_size // 2
-    padded = np.pad(image, pad, mode='symmetric')
-    windows = sliding_window_view(padded, (kernel_size, kernel_size))
-    filtered = np.sum(windows * kernel, axis=(2, 3))
-    return np.clip(filtered, 0, 255).astype(np.uint8)
-
-# Edge Detection Functions
-
-
-def apply_prewitt(image):
-    if len(image.shape) == 3:
-        return np.stack([apply_prewitt(image[:, :, c]) for c in range(3)], axis=2)
-
-    kernel_x = np.array([[-1, 0, 1],
-                        [-1, 0, 1],
-                        [-1, 0, 1]])
-    kernel_y = np.array([[-1, -1, -1],
-                        [0, 0, 0],
-                        [1, 1, 1]])
-
-    padded = np.pad(image, 1, mode='reflect')
-    windows = sliding_window_view(padded, (3, 3))
-
-    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
-    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
-
-    gradient = np.sqrt(grad_x**2 + grad_y**2)
-    return np.clip(gradient, 0, 255).astype(np.uint8)
-
-
-def apply_sobel(image):
-    if len(image.shape) == 3:
-        return np.stack([apply_sobel(image[:, :, c]) for c in range(3)], axis=2)
-
-    kernel_x = np.array([[1, 0, -1],
-                        [2, 0, -2],
-                        [1, 0, -1]])
-    kernel_y = np.array([[1, 2, 1],
-                        [0, 0, 0],
-                        [-1, -2, -1]])
-
-    padded = np.pad(image, 1, mode='reflect')
-    windows = sliding_window_view(padded, (3, 3))
-
-    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
-    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
-
-    gradient = np.sqrt(grad_x**2 + grad_y**2)
-    return np.clip(gradient, 0, 255).astype(np.uint8)
-
-
-def apply_laplacian(image):
-    if len(image.shape) == 3:
-        return np.stack([apply_laplacian(image[:, :, c]) for c in range(3)], axis=2)
-
-    kernel = np.array([[0, 1, 0],
-                      [1, -4, 1],
-                      [0, 1, 0]])
-
-    padded = np.pad(image, 1, mode='reflect')
-    windows = sliding_window_view(padded, (3, 3))
-
-    laplacian = np.sum(windows * kernel, axis=(2, 3))
-    return np.clip(np.abs(laplacian), 0, 255).astype(np.uint8)
-
-
-def load_image(img_num):
-    global image1, image2, image1_array, image2_array
-    file_path = filedialog.askopenfilename(filetypes=[
-        ("Image Files", "*.bmp *.jpg *.png *.jpeg *.tif")
-    ])
-
-    if not file_path:
-        return
-
-    try:
-        img = Image.open(file_path).convert("RGB")
-        img_array = np.array(img)
-
-        if img_num == 1:
-            image1 = img
-            image1_array = img_array
-            display_image(img, img1_label)
-        else:
-            image2 = img
-            image2_array = img_array
-            display_image(img, img2_label)
-
-    except Exception as e:
-        messagebox.showerror("Error", f"Failed to load image: {str(e)}")
-
-
-def display_image(img, label):
-    img.thumbnail((300, 300))
-    photo = ImageTk.PhotoImage(img)
-    label.configure(image=photo)
-    label.image = photo
-
 
 # Operation groups structure
 OPERATION_GROUPS = {
@@ -200,51 +74,121 @@ OPERATION_GROUPS = {
     }
 }
 
-
-def update_operations_dropdown(selected_group):
-    operations = OPERATION_GROUPS[selected_group]["operations"]
-    operations_dropdown.configure(values=operations)
-    operations_dropdown.set(operations[0] if operations else "")
-    toggle_inputs()
+# ===================== IMAGE PROCESSING FUNCTIONS =====================
+# --------------------- Filter Functions ---------------------
 
 
-def toggle_inputs(event=None):
-    selected_group = groups_dropdown.get()
-    selected_operation = operations_dropdown.get()
+def create_gaussian_kernel(size, sigma):
+    """Create a Gaussian kernel for image filtering"""
+    kernel = np.zeros((size, size))
+    center = size // 2
+    sum_val = 0.0
 
-    constant_entry.configure(state="disabled")
-    alpha_entry.configure(state="disabled")
-    constant_entry.delete(0, 'end')
-    alpha_entry.delete(0, 'end')
+    for i in range(size):
+        for j in range(size):
+            x, y = i - center, j - center
+            kernel[i, j] = np.exp(-(x**2 + y**2) / (2 * sigma**2))
+            sum_val += kernel[i, j]
 
-    if selected_group in OPERATION_GROUPS:
-        group_data = OPERATION_GROUPS[selected_group]
+    kernel /= sum_val
+    return kernel
 
-        if selected_operation in group_data["needs_constant"]:
-            constant_entry.configure(state="normal")
 
-        if selected_group == "Blending" and selected_operation == "Linear Blend":
-            alpha_entry.configure(state="normal")
+def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
+    """Apply Gaussian filter to image"""
+    if len(image.shape) == 3:
+        filtered = np.zeros_like(image)
+        for c in range(3):
+            filtered[:, :, c] = apply_gaussian_filter_manual(
+                image[:, :, c], sigma, kernel_size)
+        return filtered
 
-# Math operations
+    kernel = create_gaussian_kernel(kernel_size, sigma)
+    pad = kernel_size // 2
+    padded = np.pad(image, pad, mode='symmetric')
+    windows = sliding_window_view(padded, (kernel_size, kernel_size))
+    filtered = np.sum(windows * kernel, axis=(2, 3))
+    return np.clip(filtered, 0, 255).astype(np.uint8)
+
+# --------------------- Edge Detection ---------------------
+
+
+def apply_prewitt(image):
+    """Apply Prewitt edge detection operator"""
+    if len(image.shape) == 3:
+        return np.stack([apply_prewitt(image[:, :, c]) for c in range(3)], axis=2)
+
+    kernel_x = np.array([[-1, 0, 1],
+                        [-1, 0, 1],
+                        [-1, 0, 1]])
+    kernel_y = np.array([[-1, -1, -1],
+                        [0, 0, 0],
+                        [1, 1, 1]])
+
+    padded = np.pad(image, 1, mode='reflect')
+    windows = sliding_window_view(padded, (3, 3))
+
+    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
+    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
+
+    gradient = np.sqrt(grad_x**2 + grad_y**2)
+    return np.clip(gradient, 0, 255).astype(np.uint8)
+
+
+def apply_sobel(image):
+    """Apply Sobel edge detection operator"""
+    if len(image.shape) == 3:
+        return np.stack([apply_sobel(image[:, :, c]) for c in range(3)], axis=2)
+
+    kernel_x = np.array([[1, 0, -1],
+                        [2, 0, -2],
+                        [1, 0, -1]])
+    kernel_y = np.array([[1, 2, 1],
+                        [0, 0, 0],
+                        [-1, -2, -1]])
+
+    padded = np.pad(image, 1, mode='reflect')
+    windows = sliding_window_view(padded, (3, 3))
+
+    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
+    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
+
+    gradient = np.sqrt(grad_x**2 + grad_y**2)
+    return np.clip(gradient, 0, 255).astype(np.uint8)
+
+
+def apply_laplacian(image):
+    """Apply Laplacian edge detection operator"""
+    if len(image.shape) == 3:
+        return np.stack([apply_laplacian(image[:, :, c]) for c in range(3)], axis=2)
+
+    kernel = np.array([[0, 1, 0],
+                      [1, -4, 1],
+                      [0, 1, 0]])
+
+    padded = np.pad(image, 1, mode='reflect')
+    windows = sliding_window_view(padded, (3, 3))
+
+    laplacian = np.sum(windows * kernel, axis=(2, 3))
+    return np.clip(np.abs(laplacian), 0, 255).astype(np.uint8)
+
+# --------------------- Arithmetic Operations ---------------------
 
 
 def add_images():
+    """Add two images pixel-wise"""
     validate_two_images()
     return np.clip(image1_array.astype(int) + image2_array.astype(int), 0, 255).astype(np.uint8)
 
 
 def subtract_images():
+    """Subtract two images pixel-wise"""
     validate_two_images()
     return np.clip(image1_array.astype(int) - image2_array.astype(int), 0, 255).astype(np.uint8)
 
 
-def image_difference():
-    validate_two_images()
-    return np.abs(image1_array.astype(int) - image2_array.astype(int)).astype(np.uint8)
-
-
 def apply_constant_operation(operation, value):
+    """Apply arithmetic operation with constant value"""
     validate_one_image()
     if operation == 'add':
         return np.clip(image1_array.astype(int) + value, 0, 255).astype(np.uint8)
@@ -255,40 +199,67 @@ def apply_constant_operation(operation, value):
     elif operation == 'divide':
         return np.clip(image1_array.astype(float) / value, 0, 255).astype(np.uint8)
 
-# Geometric operations
+# --------------------- Geometric Operations ---------------------
 
 
 def flip_horizontal():
+    """Flip image horizontally"""
     validate_one_image()
     return np.fliplr(image1_array).copy()
 
 
 def flip_vertical():
+    """Flip image vertically"""
     validate_one_image()
     return np.flipud(image1_array).copy()
 
-# Color conversion
+# --------------------- Color Operations ---------------------
 
 
 def rgb_to_grayscale():
+    """Convert RGB image to grayscale"""
     validate_one_image()
     return np.dot(image1_array[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
 
-# Blend operations
+
+def rgb_to_yuv(rgb):
+    """Convert RGB color space to YUV"""
+    yuv = np.empty_like(rgb)
+    yuv[..., 0] = 0.299 * rgb[..., 0] + 0.587 * \
+        rgb[..., 1] + 0.114 * rgb[..., 2]
+    yuv[..., 1] = -0.14713 * rgb[..., 0] - \
+        0.28886 * rgb[..., 1] + 0.436 * rgb[..., 2]
+    yuv[..., 2] = 0.615 * rgb[..., 0] - 0.51499 * \
+        rgb[..., 1] - 0.10001 * rgb[..., 2]
+    return yuv
+
+
+def yuv_to_rgb(yuv):
+    """Convert YUV color space back to RGB"""
+    rgb = np.empty_like(yuv)
+    rgb[..., 0] = yuv[..., 0] + 1.13983 * yuv[..., 2]
+    rgb[..., 1] = yuv[..., 0] - 0.39465 * yuv[..., 1] - 0.58060 * yuv[..., 2]
+    rgb[..., 2] = yuv[..., 0] + 2.03211 * yuv[..., 1]
+    return np.clip(rgb, 0, 255).astype(np.uint8)
+
+# --------------------- Blending Operations ---------------------
 
 
 def linear_blend(alpha):
+    """Linear blend of two images"""
     validate_two_images()
     return (alpha * image1_array + (1 - alpha) * image2_array).astype(np.uint8)
 
 
 def average_images():
+    """Average two images"""
     return linear_blend(0.5)
 
-# Logic operations
+# --------------------- Logical Operations ---------------------
 
 
 def logical_operation(operation):
+    """Perform logical operation (AND, OR, XOR, NOT)"""
     validate_one_image()
     img1_bin = binarize_image(image1_array)
 
@@ -307,13 +278,15 @@ def logical_operation(operation):
 
 
 def binarize_image(img, threshold=127):
+    """Convert image to binary using threshold"""
     gray = rgb_to_grayscale() if len(img.shape) == 3 else img
     return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
-# Histogram equalization
+# --------------------- Histogram Operations ---------------------
 
 
 def histogram_equalization():
+    """Perform histogram equalization"""
     validate_one_image()
     original = image1_array.copy()
 
@@ -338,42 +311,26 @@ def histogram_equalization():
 
 
 def equalize_channel(channel):
+    """Equalize single image channel"""
     hist, bins = np.histogram(channel.flatten(), 256, [0, 256])
     cdf = hist.cumsum()
     cdf_normalized = (cdf - cdf.min()) * 255 / (cdf.max() - cdf.min())
     return np.interp(channel.flatten(), bins[:-1], cdf_normalized).reshape(channel.shape).astype(np.uint8)
 
-
-def rgb_to_yuv(rgb):
-    yuv = np.empty_like(rgb)
-    yuv[..., 0] = 0.299 * rgb[..., 0] + 0.587 * \
-        rgb[..., 1] + 0.114 * rgb[..., 2]
-    yuv[..., 1] = -0.14713 * rgb[..., 0] - \
-        0.28886 * rgb[..., 1] + 0.436 * rgb[..., 2]
-    yuv[..., 2] = 0.615 * rgb[..., 0] - 0.51499 * \
-        rgb[..., 1] - 0.10001 * rgb[..., 2]
-    return yuv
-
-
-def yuv_to_rgb(yuv):
-    rgb = np.empty_like(yuv)
-    rgb[..., 0] = yuv[..., 0] + 1.13983 * yuv[..., 2]
-    rgb[..., 1] = yuv[..., 0] - 0.39465 * yuv[..., 1] - 0.58060 * yuv[..., 2]
-    rgb[..., 2] = yuv[..., 0] + 2.03211 * yuv[..., 1]
-    return np.clip(rgb, 0, 255).astype(np.uint8)
-
-# Thresholding
+# --------------------- Thresholding ---------------------
 
 
 def threshold_image(threshold):
+    """Apply thresholding to image"""
     validate_one_image()
     gray = rgb_to_grayscale() if len(image1_array.shape) == 3 else image1_array
     return np.where(gray > threshold, 255, 0).astype(np.uint8)
 
-# Spatial filters
+# --------------------- Spatial Filters ---------------------
 
 
 def apply_filter(channel, kernel_size, filter_type, order_rank=None):
+    """Apply spatial filter to image channel"""
     pad = (kernel_size - 1) // 2
     padded = np.pad(channel, pad, mode='symmetric')
     windows = sliding_window_view(padded, (kernel_size, kernel_size))
@@ -402,10 +359,11 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
     return filtered.astype(np.uint8)
 
-# Morphological operations ===============================================
+# --------------------- Morphological Operations ---------------------
 
 
 def prepare_binary_image(image):
+    """Prepare binary image for morphological operations"""
     if len(image.shape) == 3:  # Color image
         binary = binarize_image(image)
     else:
@@ -417,11 +375,10 @@ def prepare_binary_image(image):
 
 
 def apply_morph_operation(image, kernel_size, operation):
-    # Prepare binary image
+    """Apply basic morphological operation (dilation/erosion)"""
     bin_img = prepare_binary_image(image)
     bin_img_01 = (bin_img // 255).astype(np.uint8)
 
-    # Create structuring element
     pad = kernel_size // 2
     padded = np.pad(bin_img_01, pad, mode='constant', constant_values=0)
     windows = sliding_window_view(padded, (kernel_size, kernel_size))
@@ -437,47 +394,134 @@ def apply_morph_operation(image, kernel_size, operation):
 
 
 def apply_dilation(image, kernel_size=3):
+    """Apply morphological dilation"""
     return apply_morph_operation(image, kernel_size, 'dilation')
 
 
 def apply_erosion(image, kernel_size=3):
+    """Apply morphological erosion"""
     return apply_morph_operation(image, kernel_size, 'erosion')
 
 
 def apply_opening(image, kernel_size=3):
+    """Apply morphological opening (erosion followed by dilation)"""
     eroded = apply_erosion(image, kernel_size)
     return apply_dilation(eroded, kernel_size)
 
 
 def apply_closing(image, kernel_size=3):
+    """Apply morphological closing (dilation followed by erosion)"""
     dilated = apply_dilation(image, kernel_size)
     return apply_erosion(dilated, kernel_size)
 
 
 def apply_contour(image, kernel_size=3):
+    """Extract morphological contours"""
     bin_img = prepare_binary_image(image)
-
     eroded = apply_erosion(bin_img, kernel_size)
-
     contour = np.where(bin_img > eroded, 255, 0).astype(np.uint8)
     return contour
 
-# Validation functions ==================================================
+# ===================== HELPER FUNCTIONS =====================
 
 
 def validate_one_image():
+    """Validate that image 1 is loaded"""
     if image1_array is None:
         raise ValueError("Load an image first")
 
 
 def validate_two_images():
+    """Validate that both images are loaded"""
     if image1_array is None or image2_array is None:
         raise ValueError("Load both images first")
     if image1_array.shape != image2_array.shape:
         raise ValueError("Images must have same dimensions")
 
+# ===================== GUI FUNCTIONS =====================
+# --------------------- Image Handling ---------------------
+
+
+def load_image(img_num):
+    """Load image from file system"""
+    global image1, image2, image1_array, image2_array
+    file_path = filedialog.askopenfilename(filetypes=[
+        ("Image Files", "*.bmp *.jpg *.png *.jpeg *.tif")
+    ])
+
+    if not file_path:
+        return
+
+    try:
+        img = Image.open(file_path).convert("RGB")
+        img_array = np.array(img)
+
+        if img_num == 1:
+            image1 = img
+            image1_array = img_array
+            display_image(img, img1_label)
+        else:
+            image2 = img
+            image2_array = img_array
+            display_image(img, img2_label)
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to load image: {str(e)}")
+
+
+def display_image(img, label):
+    """Display image in GUI"""
+    img.thumbnail((300, 300))
+    photo = ImageTk.PhotoImage(img)
+    label.configure(image=photo)
+    label.image = photo
+
+
+def save_result():
+    """Save result image to file"""
+    if result_image is None:
+        messagebox.showwarning("Warning", "No result to save")
+        return
+
+    file_path = filedialog.asksaveasfilename(
+        defaultextension=".png",
+        filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg"), ("BMP", "*.bmp")]
+    )
+
+    if file_path:
+        result_image.save(file_path)
+        messagebox.showinfo("Success", "Image saved successfully!")
+
+# --------------------- Operation Controls ---------------------
+
+
+def update_operations_dropdown(selected_group):
+    """Update operations dropdown based on selected group"""
+    operations = OPERATION_GROUPS[selected_group]["operations"]
+    operations_dropdown.configure(values=operations)
+    operations_dropdown.set(operations[0] if operations else "")
+    toggle_inputs()
+
+
+def toggle_inputs(event=None):
+    """Enable/disable input fields based on operation selection"""
+    selected_group = groups_dropdown.get()
+    selected_operation = operations_dropdown.get()
+
+    constant_entry.configure(state="disabled")
+    constant_entry.delete(0, 'end')
+
+    if selected_group in OPERATION_GROUPS:
+        group_data = OPERATION_GROUPS[selected_group]
+
+        if selected_operation in group_data["needs_constant"]:
+            constant_entry.configure(state="normal")
+
+# --------------------- Histogram Visualization ---------------------
+
 
 def show_histogram_modal(original_hist, equalized_hist):
+    """Show histogram comparison in modal window"""
     hist_window = customtkinter.CTkToplevel()
     hist_window.title("Histogram Comparison")
     hist_window.geometry("800x500")
@@ -514,15 +558,15 @@ def show_histogram_modal(original_hist, equalized_hist):
     )
     btn_close.pack(pady=10)
 
-# Main operation handler ================================================
+# --------------------- Operation Handler ---------------------
 
 
 def apply_operation():
+    """Apply selected operation to images"""
     global result_image
     selected_group = groups_dropdown.get()
     operation = operations_dropdown.get()
     constant = constant_entry.get()
-    alpha_val = alpha_entry.get()
 
     try:
         if selected_group == "Select Category" or operation == "Select Operation":
@@ -569,9 +613,9 @@ def apply_operation():
         elif selected_group == "Blending":
             validate_two_images()
             if operation == "Linear Blend":
-                if not alpha_val:
+                if not constant:
                     raise ValueError("Alpha value is required")
-                alpha = float(alpha_val)
+                alpha = float(constant)
                 result = linear_blend(alpha)
             elif operation == "Average Images":
                 result = average_images()
@@ -616,7 +660,6 @@ def apply_operation():
                     )
                 result = filtered.astype(np.uint8)
 
-        # ========== MORPHOLOGICAL OPERATIONS ==========
         elif selected_group == "Morphological":
             validate_one_image()
             if not constant:
@@ -643,7 +686,7 @@ def apply_operation():
             elif operation == "Laplacian":
                 result = apply_laplacian(image1_array)
 
-        # Handle result display
+        # Display result
         if len(result.shape) == 2:
             result_image = Image.fromarray(result, 'L')
         else:
@@ -654,32 +697,7 @@ def apply_operation():
         messagebox.showerror("Error", str(e))
 
 
-def save_result():
-    if result_image is None:
-        messagebox.showwarning("Warning", "No result to save")
-        return
-
-    file_path = filedialog.asksaveasfilename(
-        defaultextension=".png",
-        filetypes=[("PNG", "*.png"), ("JPEG", "*.jpg"), ("BMP", "*.bmp")]
-    )
-
-    if file_path:
-        result_image.save(file_path)
-        messagebox.showinfo("Success", "Image saved successfully!")
-
-
-# ===================== GUI Setup =====================
-customtkinter.set_appearance_mode("dark")
-customtkinter.set_default_color_theme("dark-blue")
-
-root = customtkinter.CTk()
-root.title('Image Processing | by luisrefatti')
-root.geometry('1280x900')
-
-root.grid_rowconfigure(1, weight=1)
-root.grid_columnconfigure(0, weight=1)
-
+# ===================== GUI SETUP =====================
 # Global variables
 image1 = None
 image2 = None
@@ -687,7 +705,17 @@ result_image = None
 image1_array = None
 image2_array = None
 
-# Header
+# Configure main window
+customtkinter.set_appearance_mode("dark")
+customtkinter.set_default_color_theme("dark-blue")
+
+root = customtkinter.CTk()
+root.title('Image Processing | by luisrefatti')
+root.geometry('1280x900')
+root.grid_rowconfigure(1, weight=1)
+root.grid_columnconfigure(0, weight=1)
+
+# Header section
 header_frame = customtkinter.CTkFrame(root)
 header_frame.grid(row=0, column=0, columnspan=4, padx=10, pady=10, sticky="ew")
 
@@ -699,6 +727,14 @@ app_name_label = customtkinter.CTkLabel(
 )
 app_name_label.pack(side="left", padx=10)
 
+app_name_label = customtkinter.CTkLabel(
+    header_frame,
+    text="|",
+    font=HEADER_FONT,
+    text_color="#7d7d7d"
+)
+app_name_label.pack(side="left", padx=10)
+
 app_author_label = customtkinter.CTkLabel(
     header_frame,
     text="Created by Luis Fernando Refatti Boff",
@@ -707,13 +743,13 @@ app_author_label = customtkinter.CTkLabel(
 )
 app_author_label.pack(side="left", padx=10)
 
-# Main content
+# Main content frame
 main_frame = customtkinter.CTkFrame(root)
 main_frame.grid(row=1, column=0, columnspan=4, padx=20, pady=20, sticky="nsew")
 main_frame.grid_rowconfigure(0, weight=1)
 main_frame.grid_columnconfigure(0, weight=1)
 
-# Load section
+# --------------------- Image Loading Section ---------------------
 load_frame = customtkinter.CTkFrame(main_frame)
 load_frame.pack(pady=10, fill="x")
 
@@ -733,7 +769,7 @@ btn_load2 = customtkinter.CTkButton(
 )
 btn_load2.grid(row=0, column=1, padx=10)
 
-# Image previews
+# --------------------- Image Preview Section ---------------------
 image_frame = customtkinter.CTkFrame(main_frame)
 image_frame.pack(pady=20, fill="both", expand=True)
 
@@ -751,10 +787,11 @@ img2_label = customtkinter.CTkLabel(
 )
 img2_label.grid(row=0, column=1, padx=20, sticky="nsew")
 
-# Controls
+# --------------------- Operation Controls Section ---------------------
 controls_frame = customtkinter.CTkFrame(main_frame)
 controls_frame.pack(pady=10, fill="x")
 
+# Operation category dropdown
 groups_dropdown = customtkinter.CTkOptionMenu(
     controls_frame,
     font=BODY_FONT,
@@ -764,6 +801,7 @@ groups_dropdown = customtkinter.CTkOptionMenu(
 groups_dropdown.set("Select Category")
 groups_dropdown.pack(side="left", padx=5)
 
+# Operation selection dropdown
 operations_dropdown = customtkinter.CTkOptionMenu(
     controls_frame,
     font=BODY_FONT,
@@ -773,6 +811,7 @@ operations_dropdown = customtkinter.CTkOptionMenu(
 operations_dropdown.set("Select Operation")
 operations_dropdown.pack(side="left", padx=5)
 
+# Parameter input field
 constant_frame = customtkinter.CTkFrame(controls_frame)
 constant_frame.pack(side="left", padx=5)
 
@@ -791,24 +830,7 @@ constant_entry = customtkinter.CTkEntry(
 )
 constant_entry.pack(side="left", padx=5)
 
-blend_frame = customtkinter.CTkFrame(controls_frame)
-blend_frame.pack(side="left", padx=5)
-
-lbl_alpha = customtkinter.CTkLabel(
-    blend_frame,
-    text="Alpha:",
-    font=BODY_FONT
-)
-lbl_alpha.pack(side="left")
-
-alpha_entry = customtkinter.CTkEntry(
-    blend_frame,
-    width=50,
-    font=BODY_FONT,
-    state="disabled"
-)
-alpha_entry.pack(side="left", padx=5)
-
+# Apply operation button
 btn_apply = customtkinter.CTkButton(
     controls_frame,
     text="Apply Operation",
@@ -817,7 +839,7 @@ btn_apply = customtkinter.CTkButton(
 )
 btn_apply.pack(side="left", padx=10)
 
-# Result section
+# --------------------- Result Section ---------------------
 result_frame = customtkinter.CTkFrame(main_frame)
 result_frame.pack(pady=20, fill="both", expand=True)
 
@@ -828,7 +850,7 @@ result_label = customtkinter.CTkLabel(
 )
 result_label.pack(expand=True)
 
-# Save button
+# Save result button
 btn_save = customtkinter.CTkButton(
     result_frame,
     text="Save Result",
@@ -837,8 +859,8 @@ btn_save = customtkinter.CTkButton(
 )
 btn_save.pack(pady=10)
 
-# Initial setup
+# ===================== APPLICATION INITIALIZATION =====================
+# Initialize dropdowns and start main loop
 update_operations_dropdown(list(OPERATION_GROUPS.keys())[0])
 toggle_inputs()
-
 root.mainloop()
