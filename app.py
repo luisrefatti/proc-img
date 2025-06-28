@@ -1,8 +1,7 @@
 from tkinter import filedialog, messagebox
 import customtkinter
 from PIL import Image, ImageTk
-import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
+import math
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -47,13 +46,12 @@ OPERATION_GROUPS = {
             "MIN Filter",
             "MEAN Filter",
             "MEDIAN Filter",
-            "ORDER Filter",
             "Conservative Smooth",
             "Gaussian Filter"
         ],
         "needs_constant": [
             "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
-            "ORDER Filter", "Conservative Smooth", "Gaussian Filter"
+            "Conservative Smooth", "Gaussian Filter"
         ]
     },
     "Edge Detection": {
@@ -74,323 +72,662 @@ OPERATION_GROUPS = {
     }
 }
 
+# ===================== MATH UTILITY FUNCTIONS =====================
+
+
+def clip(value, min_val, max_val):
+    """Clip value between min and max"""
+    return min(max(value, min_val), max_val)
+
+
+def create_2d_array(width, height, default=0):
+    """Create a 2D array with given dimensions"""
+    return [[default for _ in range(width)] for _ in range(height)]
+
+
+def create_3d_array(width, height, depth=3, default=0):
+    """Create a 3D array with given dimensions"""
+    return [[[default for _ in range(depth)] for _ in range(width)] for _ in range(height)]
+
+
+def get_pixel(image, x, y):
+    """Get pixel value with boundary reflection"""
+    height = len(image)
+    width = len(image[0])
+
+    # Reflect boundaries
+    x = max(0, min(x, width - 1))
+    y = max(0, min(y, height - 1))
+
+    return image[y][x]
+
+
+def apply_kernel(image, kernel):
+    """Apply kernel convolution to image"""
+    height = len(image)
+    width = len(image[0])
+    k_height = len(kernel)
+    k_width = len(kernel[0])
+    k_half_h = k_height // 2
+    k_half_w = k_width // 2
+
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            accum = 0.0
+            for ky in range(k_height):
+                for kx in range(k_width):
+                    px = x + kx - k_half_w
+                    py = y + ky - k_half_h
+
+                    # Reflect boundaries
+                    if px < 0:
+                        px = -px
+                    if px >= width:
+                        px = 2 * width - px - 1
+                    if py < 0:
+                        py = -py
+                    if py >= height:
+                        py = 2 * height - py - 1
+
+                    pixel = image[py][px]
+                    if isinstance(pixel, tuple):
+                        # For RGB images, use luminance
+                        pixel = 0.299 * pixel[0] + 0.587 * \
+                            pixel[1] + 0.114 * pixel[2]
+
+                    accum += pixel * kernel[ky][kx]
+
+            result[y][x] = clip(int(accum), 0, 255)
+
+    return result
+
+
+def sliding_window_view(image, kernel_size):
+    """Manual implementation of sliding window view"""
+    height = len(image)
+    width = len(image[0])
+    k_half = kernel_size // 2
+    windows = []
+
+    for y in range(height):
+        row_windows = []
+        for x in range(width):
+            window = []
+            for ky in range(-k_half, k_half + 1):
+                for kx in range(-k_half, k_half + 1):
+                    px = x + kx
+                    py = y + ky
+
+                    # Reflect boundaries
+                    if px < 0:
+                        px = -px
+                    if px >= width:
+                        px = 2 * width - px - 1
+                    if py < 0:
+                        py = -py
+                    if py >= height:
+                        py = 2 * height - py - 1
+
+                    window.append(image[py][px])
+            row_windows.append(window)
+        windows.append(row_windows)
+
+    return windows
+
 # ===================== IMAGE PROCESSING FUNCTIONS =====================
 # --------------------- Filter Functions ---------------------
 
 
 def create_gaussian_kernel(size, sigma):
     """Create a Gaussian kernel for image filtering"""
-    kernel = np.zeros((size, size))
+    kernel = [[0.0] * size for _ in range(size)]
     center = size // 2
     sum_val = 0.0
 
     for i in range(size):
         for j in range(size):
             x, y = i - center, j - center
-            kernel[i, j] = np.exp(-(x**2 + y**2) / (2 * sigma**2))
-            sum_val += kernel[i, j]
+            value = math.exp(-(x**2 + y**2) / (2 * sigma**2))
+            kernel[i][j] = value
+            sum_val += value
 
-    kernel /= sum_val
+    # Normalize kernel
+    for i in range(size):
+        for j in range(size):
+            kernel[i][j] /= sum_val
+
     return kernel
 
 
 def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
     """Apply Gaussian filter to image"""
-    if len(image.shape) == 3:
-        filtered = np.zeros_like(image)
-        for c in range(3):
-            filtered[:, :, c] = apply_gaussian_filter_manual(
-                image[:, :, c], sigma, kernel_size)
-        return filtered
-
     kernel = create_gaussian_kernel(kernel_size, sigma)
-    pad = kernel_size // 2
-    padded = np.pad(image, pad, mode='symmetric')
-    windows = sliding_window_view(padded, (kernel_size, kernel_size))
-    filtered = np.sum(windows * kernel, axis=(2, 3))
-    return np.clip(filtered, 0, 255).astype(np.uint8)
+    return apply_kernel(image, kernel)
 
 # --------------------- Edge Detection ---------------------
 
 
 def apply_prewitt(image):
     """Apply Prewitt edge detection operator"""
-    if len(image.shape) == 3:
-        return np.stack([apply_prewitt(image[:, :, c]) for c in range(3)], axis=2)
+    kernel_x = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
+    kernel_y = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]]
 
-    kernel_x = np.array([[-1, 0, 1],
-                        [-1, 0, 1],
-                        [-1, 0, 1]])
-    kernel_y = np.array([[-1, -1, -1],
-                        [0, 0, 0],
-                        [1, 1, 1]])
+    grad_x = apply_kernel(image, kernel_x)
+    grad_y = apply_kernel(image, kernel_y)
 
-    padded = np.pad(image, 1, mode='reflect')
-    windows = sliding_window_view(padded, (3, 3))
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
 
-    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
-    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
+    for y in range(height):
+        for x in range(width):
+            gradient = math.sqrt(grad_x[y][x]**2 + grad_y[y][x]**2)
+            result[y][x] = clip(int(gradient), 0, 255)
 
-    gradient = np.sqrt(grad_x**2 + grad_y**2)
-    return np.clip(gradient, 0, 255).astype(np.uint8)
+    return result
 
 
 def apply_sobel(image):
     """Apply Sobel edge detection operator"""
-    if len(image.shape) == 3:
-        return np.stack([apply_sobel(image[:, :, c]) for c in range(3)], axis=2)
+    kernel_x = [[1, 0, -1], [2, 0, -2], [1, 0, -1]]
+    kernel_y = [[1, 2, 1], [0, 0, 0], [-1, -2, -1]]
 
-    kernel_x = np.array([[1, 0, -1],
-                        [2, 0, -2],
-                        [1, 0, -1]])
-    kernel_y = np.array([[1, 2, 1],
-                        [0, 0, 0],
-                        [-1, -2, -1]])
+    grad_x = apply_kernel(image, kernel_x)
+    grad_y = apply_kernel(image, kernel_y)
 
-    padded = np.pad(image, 1, mode='reflect')
-    windows = sliding_window_view(padded, (3, 3))
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
 
-    grad_x = np.sum(windows * kernel_x, axis=(2, 3))
-    grad_y = np.sum(windows * kernel_y, axis=(2, 3))
+    for y in range(height):
+        for x in range(width):
+            gradient = math.sqrt(grad_x[y][x]**2 + grad_y[y][x]**2)
+            result[y][x] = clip(int(gradient), 0, 255)
 
-    gradient = np.sqrt(grad_x**2 + grad_y**2)
-    return np.clip(gradient, 0, 255).astype(np.uint8)
+    return result
 
 
 def apply_laplacian(image):
     """Apply Laplacian edge detection operator"""
-    if len(image.shape) == 3:
-        return np.stack([apply_laplacian(image[:, :, c]) for c in range(3)], axis=2)
+    kernel = [[0, 1, 0], [1, -4, 1], [0, 1, 0]]
+    laplacian = apply_kernel(image, kernel)
 
-    kernel = np.array([[0, 1, 0],
-                      [1, -4, 1],
-                      [0, 1, 0]])
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
 
-    padded = np.pad(image, 1, mode='reflect')
-    windows = sliding_window_view(padded, (3, 3))
+    for y in range(height):
+        for x in range(width):
+            result[y][x] = clip(abs(laplacian[y][x]), 0, 255)
 
-    laplacian = np.sum(windows * kernel, axis=(2, 3))
-    return np.clip(np.abs(laplacian), 0, 255).astype(np.uint8)
+    return result
 
 # --------------------- Arithmetic Operations ---------------------
 
 
-def add_images():
+def add_images(img1, img2):
     """Add two images pixel-wise"""
-    validate_two_images()
-    return np.clip(image1_array.astype(int) + image2_array.astype(int), 0, 255).astype(np.uint8)
+    height = len(img1)
+    width = len(img1[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            if isinstance(img1[y][x], tuple) and isinstance(img2[y][x], tuple):
+                # RGB images
+                r = clip(img1[y][x][0] + img2[y][x][0], 0, 255)
+                g = clip(img1[y][x][1] + img2[y][x][1], 0, 255)
+                b = clip(img1[y][x][2] + img2[y][x][2], 0, 255)
+                result[y][x] = (r, g, b)
+            else:
+                # Grayscale images
+                result[y][x] = clip(img1[y][x] + img2[y][x], 0, 255)
+
+    return result
 
 
-def subtract_images():
+def subtract_images(img1, img2):
     """Subtract two images pixel-wise"""
-    validate_two_images()
-    return np.clip(image1_array.astype(int) - image2_array.astype(int), 0, 255).astype(np.uint8)
+    height = len(img1)
+    width = len(img1[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            if isinstance(img1[y][x], tuple) and isinstance(img2[y][x], tuple):
+                # RGB images
+                r = clip(img1[y][x][0] - img2[y][x][0], 0, 255)
+                g = clip(img1[y][x][1] - img2[y][x][1], 0, 255)
+                b = clip(img1[y][x][2] - img2[y][x][2], 0, 255)
+                result[y][x] = (r, g, b)
+            else:
+                # Grayscale images
+                result[y][x] = clip(img1[y][x] - img2[y][x], 0, 255)
+
+    return result
 
 
-def apply_constant_operation(operation, value):
+def apply_constant_operation(image, operation, value):
     """Apply arithmetic operation with constant value"""
-    validate_one_image()
-    if operation == 'add':
-        return np.clip(image1_array.astype(int) + value, 0, 255).astype(np.uint8)
-    elif operation == 'subtract':
-        return np.clip(image1_array.astype(int) - value, 0, 255).astype(np.uint8)
-    elif operation == 'multiply':
-        return np.clip(image1_array.astype(float) * value, 0, 255).astype(np.uint8)
-    elif operation == 'divide':
-        return np.clip(image1_array.astype(float) / value, 0, 255).astype(np.uint8)
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            if isinstance(image[y][x], tuple):
+                # RGB images
+                r, g, b = image[y][x]
+                if operation == 'add':
+                    r = clip(r + value, 0, 255)
+                    g = clip(g + value, 0, 255)
+                    b = clip(b + value, 0, 255)
+                elif operation == 'subtract':
+                    r = clip(r - value, 0, 255)
+                    g = clip(g - value, 0, 255)
+                    b = clip(b - value, 0, 255)
+                elif operation == 'multiply':
+                    r = clip(r * value, 0, 255)
+                    g = clip(g * value, 0, 255)
+                    b = clip(b * value, 0, 255)
+                elif operation == 'divide':
+                    r = clip(r / value, 0, 255)
+                    g = clip(g / value, 0, 255)
+                    b = clip(b / value, 0, 255)
+                result[y][x] = (int(r), int(g), int(b))
+            else:
+                # Grayscale images
+                if operation == 'add':
+                    result[y][x] = clip(image[y][x] + value, 0, 255)
+                elif operation == 'subtract':
+                    result[y][x] = clip(image[y][x] - value, 0, 255)
+                elif operation == 'multiply':
+                    result[y][x] = clip(image[y][x] * value, 0, 255)
+                elif operation == 'divide':
+                    result[y][x] = clip(image[y][x] / value, 0, 255)
+
+    return result
 
 # --------------------- Geometric Operations ---------------------
 
 
-def flip_horizontal():
-    """Flip image horizontally"""
-    validate_one_image()
-    return np.fliplr(image1_array).copy()
+def flip_horizontal(image):
+    """Flip image horizontally using array indexing"""
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            result[y][x] = image[y][width - x - 1]
+
+    return result
 
 
-def flip_vertical():
-    """Flip image vertically"""
-    validate_one_image()
-    return np.flipud(image1_array).copy()
+def flip_vertical(image):
+    """Flip image vertically using array indexing"""
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            result[y][x] = image[height - y - 1][x]
+
+    return result
 
 # --------------------- Color Operations ---------------------
 
 
-def rgb_to_grayscale():
+def rgb_to_grayscale(image):
     """Convert RGB image to grayscale"""
-    validate_one_image()
-    return np.dot(image1_array[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b = image[y][x]
+            gray = 0.299 * r + 0.587 * g + 0.114 * b
+            result[y][x] = clip(int(gray), 0, 255)
+
+    return result
 
 
-def rgb_to_yuv(rgb):
-    """Convert RGB color space to YUV"""
-    yuv = np.empty_like(rgb)
-    yuv[..., 0] = 0.299 * rgb[..., 0] + 0.587 * \
-        rgb[..., 1] + 0.114 * rgb[..., 2]
-    yuv[..., 1] = -0.14713 * rgb[..., 0] - \
-        0.28886 * rgb[..., 1] + 0.436 * rgb[..., 2]
-    yuv[..., 2] = 0.615 * rgb[..., 0] - 0.51499 * \
-        rgb[..., 1] - 0.10001 * rgb[..., 2]
-    return yuv
+def threshold_image(image, threshold):
+    """Apply thresholding to image"""
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
 
+    for y in range(height):
+        for x in range(width):
+            if isinstance(image[y][x], tuple):
+                # For RGB images, convert to grayscale first
+                r, g, b = image[y][x]
+                gray = 0.299 * r + 0.587 * g + 0.114 * b
+                result[y][x] = 255 if gray > threshold else 0
+            else:
+                # Grayscale images
+                result[y][x] = 255 if image[y][x] > threshold else 0
 
-def yuv_to_rgb(yuv):
-    """Convert YUV color space back to RGB"""
-    rgb = np.empty_like(yuv)
-    rgb[..., 0] = yuv[..., 0] + 1.13983 * yuv[..., 2]
-    rgb[..., 1] = yuv[..., 0] - 0.39465 * yuv[..., 1] - 0.58060 * yuv[..., 2]
-    rgb[..., 2] = yuv[..., 0] + 2.03211 * yuv[..., 1]
-    return np.clip(rgb, 0, 255).astype(np.uint8)
+    return result
 
 # --------------------- Blending Operations ---------------------
 
 
-def linear_blend(alpha):
+def linear_blend(img1, img2, alpha):
     """Linear blend of two images"""
-    validate_two_images()
-    return (alpha * image1_array + (1 - alpha) * image2_array).astype(np.uint8)
+    height = len(img1)
+    width = len(img1[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            if isinstance(img1[y][x], tuple) and isinstance(img2[y][x], tuple):
+                # RGB images
+                r1, g1, b1 = img1[y][x]
+                r2, g2, b2 = img2[y][x]
+                r = alpha * r1 + (1 - alpha) * r2
+                g = alpha * g1 + (1 - alpha) * g2
+                b = alpha * b1 + (1 - alpha) * b2
+                result[y][x] = (int(r), int(g), int(b))
+            else:
+                # Grayscale images
+                result[y][x] = alpha * img1[y][x] + (1 - alpha) * img2[y][x]
+
+    return result
 
 
-def average_images():
+def average_images(img1, img2):
     """Average two images"""
-    return linear_blend(0.5)
+    return linear_blend(img1, img2, 0.5)
 
 # --------------------- Logical Operations ---------------------
 
 
-def logical_operation(operation):
-    """Perform logical operation (AND, OR, XOR, NOT)"""
-    validate_one_image()
-    img1_bin = binarize_image(image1_array)
+def logical_operation(img1, img2, operation):
+    """Perform logical operation (AND, OR, XOR, NOT) using mathematical operations"""
+    height = len(img1)
+    width = len(img1[0])
+    result = create_2d_array(width, height, 0)
 
-    if operation != "NOT":
-        validate_two_images()
-        img2_bin = binarize_image(image2_array)
+    for y in range(height):
+        for x in range(width):
+            if isinstance(img1[y][x], tuple):
+                # For RGB images, convert to grayscale first
+                r, g, b = img1[y][x]
+                val1 = 1 if (0.299 * r + 0.587 * g + 0.114 * b) > 127 else 0
+            else:
+                val1 = 1 if img1[y][x] > 127 else 0
 
-    if operation == "AND":
-        return np.bitwise_and(img1_bin, img2_bin)
-    elif operation == "OR":
-        return np.bitwise_or(img1_bin, img2_bin)
-    elif operation == "XOR":
-        return np.bitwise_xor(img1_bin, img2_bin)
-    elif operation == "NOT":
-        return np.bitwise_not(img1_bin)
+            if operation != "NOT":
+                if isinstance(img2[y][x], tuple):
+                    r, g, b = img2[y][x]
+                    val2 = 1 if (0.299 * r + 0.587 * g +
+                                 0.114 * b) > 127 else 0
+                else:
+                    val2 = 1 if img2[y][x] > 127 else 0
+
+            if operation == "AND":
+                res = min(val1, val2)
+            elif operation == "OR":
+                res = max(val1, val2)
+            elif operation == "XOR":
+                res = (val1 + val2) % 2
+            elif operation == "NOT":
+                res = 1 - val1
+
+            result[y][x] = res * 255
+
+    return result
+
+# ===================== HISTOGRAM OPERATIONS =====================
 
 
-def binarize_image(img, threshold=127):
-    """Convert image to binary using threshold"""
-    gray = rgb_to_grayscale() if len(img.shape) == 3 else img
-    return np.where(gray > threshold, 255, 0).astype(np.uint8)
+def compute_histogram(image):
+    """Compute histogram for a 2D image array (grayscale)"""
+    hist = [0] * 256
+    height = len(image)
+    width = len(image[0])
 
-# --------------------- Histogram Operations ---------------------
+    for y in range(height):
+        for x in range(width):
+            val = image[y][x]
+            if 0 <= val < 256:
+                hist[val] += 1
+    return hist
 
 
-def histogram_equalization():
+def histogram_equalization(image):
     """Perform histogram equalization"""
-    validate_one_image()
-    original = image1_array.copy()
+    # For color images, convert to YUV, equalize Y channel, then convert back
+    if isinstance(image[0][0], tuple):
+        # Create grayscale version for histogram calculation
+        gray_img = rgb_to_grayscale(image)
+        orig_hist = compute_histogram(gray_img)
 
-    if len(original.shape) == 3:
-        yuv = rgb_to_yuv(original)
-        y_channel = yuv[:, :, 0].copy()
-        equalized_y = equalize_channel(y_channel)
+        # Convert to YUV
+        yuv = rgb_to_yuv(image)
+        height = len(image)
+        width = len(image[0])
 
-        yuv[:, :, 0] = equalized_y
-        equalized = yuv_to_rgb(yuv)
+        # Extract Y channel
+        y_channel = create_2d_array(width, height, 0.0)
+        for y in range(height):
+            for x in range(width):
+                y_channel[y][x] = yuv[y][x][0]
 
-        original_gray = np.dot(original[..., :3], [
-                               0.299, 0.587, 0.114]).astype(np.uint8)
-        original_hist = np.histogram(original_gray.flatten(), 256, [0, 256])[0]
-        equalized_hist = np.histogram(equalized_y.flatten(), 256, [0, 256])[0]
+        # Equalize Y channel
+        eq_y, cdf_normalized = equalize_channel(y_channel)
+
+        # Create new YUV with equalized Y
+        new_yuv = create_3d_array(width, height, 3, 0.0)
+        for y in range(height):
+            for x in range(width):
+                new_yuv[y][x] = (eq_y[y][x], yuv[y][x][1], yuv[y][x][2])
+
+        # Convert back to RGB
+        equalized = yuv_to_rgb(new_yuv)
+
+        # Compute histogram for equalized Y channel
+        eq_y_int = create_2d_array(width, height, 0)
+        for y in range(height):
+            for x in range(width):
+                eq_y_int[y][x] = int(eq_y[y][x])
+        eq_hist = compute_histogram(eq_y_int)
+
+        return equalized, orig_hist, eq_hist
     else:
-        equalized = equalize_channel(original)
-        original_hist = np.histogram(original.flatten(), 256, [0, 256])[0]
-        equalized_hist = np.histogram(equalized.flatten(), 256, [0, 256])[0]
+        # Grayscale image
+        orig_hist = compute_histogram(image)
+        equalized, cdf_normalized = equalize_channel(image)
 
-    return equalized.astype(np.uint8), original_hist, equalized_hist
+        # Compute histogram for equalized image
+        eq_hist = compute_histogram(equalized)
+
+        return equalized, orig_hist, eq_hist
 
 
 def equalize_channel(channel):
     """Equalize single image channel"""
-    hist, bins = np.histogram(channel.flatten(), 256, [0, 256])
-    cdf = hist.cumsum()
-    cdf_normalized = (cdf - cdf.min()) * 255 / (cdf.max() - cdf.min())
-    return np.interp(channel.flatten(), bins[:-1], cdf_normalized).reshape(channel.shape).astype(np.uint8)
+    # Convert to integer values for histogram computation
+    height = len(channel)
+    width = len(channel[0])
+    int_channel = create_2d_array(width, height, 0)
+    for y in range(height):
+        for x in range(width):
+            int_val = int(round(channel[y][x]))
+            int_channel[y][x] = clip(int_val, 0, 255)
 
-# --------------------- Thresholding ---------------------
+    # Compute histogram
+    hist = compute_histogram(int_channel)
+
+    # Compute cumulative distribution
+    cdf = [0] * 256
+    cdf[0] = hist[0]
+    for i in range(1, 256):
+        cdf[i] = cdf[i-1] + hist[i]
+
+    # Find minimum non-zero CDF value
+    cdf_min = next((val for val in cdf if val > 0), 0)
+    cdf_max = cdf[-1]
+
+    # Normalize CDF
+    cdf_normalized = [0] * 256
+    if cdf_max - cdf_min > 0:
+        for i in range(256):
+            cdf_normalized[i] = int(
+                255 * (cdf[i] - cdf_min) / (cdf_max - cdf_min))
+    else:
+        cdf_normalized = cdf  # Fallback for uniform images
+
+    # Apply equalization
+    equalized = create_2d_array(width, height, 0)
+    for y in range(height):
+        for x in range(width):
+            val = int_channel[y][x]
+            equalized[y][x] = cdf_normalized[val]
+
+    return equalized, cdf_normalized
+
+# ===================== COLOR CONVERSION FUNCTIONS =====================
 
 
-def threshold_image(threshold):
-    """Apply thresholding to image"""
-    validate_one_image()
-    gray = rgb_to_grayscale() if len(image1_array.shape) == 3 else image1_array
-    return np.where(gray > threshold, 255, 0).astype(np.uint8)
+def rgb_to_yuv(rgb_image):
+    """Convert RGB image to YUV color space"""
+    height = len(rgb_image)
+    width = len(rgb_image[0])
+    yuv = create_3d_array(width, height, 3, 0.0)
+
+    for y in range(height):
+        for x in range(width):
+            r, g, b = rgb_image[y][x]
+            y_val = 0.299 * r + 0.587 * g + 0.114 * b
+            u_val = -0.147 * r - 0.289 * g + 0.436 * b
+            v_val = 0.615 * r - 0.515 * g - 0.100 * b
+            yuv[y][x] = (y_val, u_val, v_val)
+
+    return yuv
+
+
+def yuv_to_rgb(yuv_image):
+    """Convert YUV image back to RGB color space"""
+    height = len(yuv_image)
+    width = len(yuv_image[0])
+    rgb = create_3d_array(width, height, 3, 0)
+
+    for y in range(height):
+        for x in range(width):
+            y_val, u_val, v_val = yuv_image[y][x]
+            r = y_val + 1.140 * v_val
+            g = y_val - 0.395 * u_val - 0.581 * v_val
+            b = y_val + 2.032 * u_val
+
+            # Clip to valid RGB range
+            r = clip(r, 0, 255)
+            g = clip(g, 0, 255)
+            b = clip(b, 0, 255)
+
+            rgb[y][x] = (int(r), int(g), int(b))
+
+    return rgb
 
 # --------------------- Spatial Filters ---------------------
 
 
-def apply_filter(channel, kernel_size, filter_type, order_rank=None):
-    """Apply spatial filter to image channel"""
-    pad = (kernel_size - 1) // 2
-    padded = np.pad(channel, pad, mode='symmetric')
-    windows = sliding_window_view(padded, (kernel_size, kernel_size))
+def apply_filter(image, kernel_size, filter_type):
+    """Apply spatial filter to image"""
+    height = len(image)
+    width = len(image[0])
+    k_half = kernel_size // 2
+    result = create_2d_array(width, height, 0)
 
-    if filter_type == 'max':
-        filtered = np.max(windows, axis=(2, 3))
-    elif filter_type == 'min':
-        filtered = np.min(windows, axis=(2, 3))
-    elif filter_type == 'mean':
-        filtered = np.mean(windows, axis=(2, 3))
-    elif filter_type == 'median':
-        filtered = np.median(windows, axis=(2, 3))
-    elif filter_type == 'order':
-        sorted_windows = np.sort(windows.reshape(
-            *windows.shape[:2], windows.shape[2]*windows.shape[3]), axis=2)
-        filtered = sorted_windows[:, :, order_rank]
-    elif filter_type == 'conservative':
-        min_vals = np.min(windows, axis=(2, 3))
-        max_vals = np.max(windows, axis=(2, 3))
-        original = windows[:, :, pad, pad]
-        min_diff = np.abs(min_vals - original)
-        max_diff = np.abs(max_vals - original)
-        filtered = np.where(min_diff < max_diff, min_vals, max_vals)
-    else:
-        raise ValueError("Invalid filter type")
+    for y in range(height):
+        for x in range(width):
+            # Extract window
+            window = []
+            for ky in range(-k_half, k_half + 1):
+                for kx in range(-k_half, k_half + 1):
+                    px = x + kx
+                    py = y + ky
 
-    return filtered.astype(np.uint8)
+                    # Reflect boundaries
+                    if px < 0:
+                        px = -px
+                    if px >= width:
+                        px = 2 * width - px - 1
+                    if py < 0:
+                        py = -py
+                    if py >= height:
+                        py = 2 * height - py - 1
+
+                    pixel = image[py][px]
+                    if isinstance(pixel, tuple):
+                        # For RGB images, use luminance
+                        pixel = 0.299 * pixel[0] + 0.587 * \
+                            pixel[1] + 0.114 * pixel[2]
+                    window.append(pixel)
+
+            # Apply filter
+            if filter_type == 'max':
+                result[y][x] = max(window)
+            elif filter_type == 'min':
+                result[y][x] = min(window)
+            elif filter_type == 'mean':
+                result[y][x] = sum(window) / len(window)
+            elif filter_type == 'median':
+                window.sort()
+                result[y][x] = window[len(window)//2]
+            elif filter_type == 'conservative':
+                min_val = min(window)
+                max_val = max(window)
+                center = window[len(window)//2]
+                min_diff = abs(center - min_val)
+                max_diff = abs(center - max_val)
+                result[y][x] = min_val if min_diff < max_diff else max_val
+
+    return result
 
 # --------------------- Morphological Operations ---------------------
 
 
-def prepare_binary_image(image):
-    """Prepare binary image for morphological operations"""
-    if len(image.shape) == 3:  # Color image
-        binary = binarize_image(image)
-    else:
-        if np.max(image) > 1:  # Grayscale image
-            binary = np.where(image > 127, 255, 0).astype(np.uint8)
-        else:
-            binary = (image * 255).astype(np.uint8)
-    return binary
-
-
 def apply_morph_operation(image, kernel_size, operation):
     """Apply basic morphological operation (dilation/erosion)"""
-    bin_img = prepare_binary_image(image)
-    bin_img_01 = (bin_img // 255).astype(np.uint8)
+    height = len(image)
+    width = len(image[0])
+    k_half = kernel_size // 2
+    result = create_2d_array(width, height, 0)
 
-    pad = kernel_size // 2
-    padded = np.pad(bin_img_01, pad, mode='constant', constant_values=0)
-    windows = sliding_window_view(padded, (kernel_size, kernel_size))
+    for y in range(height):
+        for x in range(width):
+            # Extract window
+            window = []
+            for ky in range(-k_half, k_half + 1):
+                for kx in range(-k_half, k_half + 1):
+                    px = x + kx
+                    py = y + ky
 
-    if operation == 'dilation':
-        result = np.max(windows, axis=(2, 3))
-    elif operation == 'erosion':
-        result = np.min(windows, axis=(2, 3))
-    else:
-        raise ValueError("Invalid morphological operation")
+                    # Handle boundaries with zero padding
+                    if 0 <= px < width and 0 <= py < height:
+                        pixel = image[py][px]
+                        if isinstance(pixel, tuple):
+                            # For RGB images, use luminance
+                            pixel = 0.299 * \
+                                pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2]
+                    else:
+                        pixel = 0
+                    window.append(pixel)
 
-    return (result * 255).astype(np.uint8)
+            # Apply operation
+            if operation == 'dilation':
+                result[y][x] = max(window)
+            elif operation == 'erosion':
+                result[y][x] = min(window)
+
+    return result
 
 
 def apply_dilation(image, kernel_size=3):
@@ -417,10 +754,33 @@ def apply_closing(image, kernel_size=3):
 
 def apply_contour(image, kernel_size=3):
     """Extract morphological contours"""
-    bin_img = prepare_binary_image(image)
-    eroded = apply_erosion(bin_img, kernel_size)
-    contour = np.where(bin_img > eroded, 255, 0).astype(np.uint8)
-    return contour
+    dilated = apply_dilation(image, kernel_size)
+    eroded = apply_erosion(image, kernel_size)
+
+    height = len(image)
+    width = len(image[0])
+    result = create_2d_array(width, height, 0)
+
+    for y in range(height):
+        for x in range(width):
+            # For RGB images, use luminance
+            orig = image[y][x]
+            if isinstance(orig, tuple):
+                orig = 0.299 * orig[0] + 0.587 * orig[1] + 0.114 * orig[2]
+
+            dil = dilated[y][x]
+            if isinstance(dil, tuple):
+                dil = 0.299 * dil[0] + 0.587 * dil[1] + 0.114 * dil[2]
+
+            ero = eroded[y][x]
+            if isinstance(ero, tuple):
+                ero = 0.299 * ero[0] + 0.587 * ero[1] + 0.114 * ero[2]
+
+            # Contour = dilated - eroded
+            contour = dil - ero
+            result[y][x] = clip(int(contour), 0, 255)
+
+    return result
 
 # ===================== HELPER FUNCTIONS =====================
 
@@ -435,7 +795,7 @@ def validate_two_images():
     """Validate that both images are loaded"""
     if image1_array is None or image2_array is None:
         raise ValueError("Load both images first")
-    if image1_array.shape != image2_array.shape:
+    if len(image1_array) != len(image2_array) or len(image1_array[0]) != len(image2_array[0]):
         raise ValueError("Images must have same dimensions")
 
 # ===================== GUI FUNCTIONS =====================
@@ -454,7 +814,17 @@ def load_image(img_num):
 
     try:
         img = Image.open(file_path).convert("RGB")
-        img_array = np.array(img)
+        width, height = img.size
+        pixels = list(img.getdata())
+
+        # Convert to 2D list: image_array[y][x] = (r, g, b)
+        img_array = []
+        for y in range(height):
+            row = []
+            for x in range(width):
+                r, g, b = pixels[y * width + x]
+                row.append((r, g, b))
+            img_array.append(row)
 
         if img_num == 1:
             image1 = img
@@ -520,43 +890,28 @@ def toggle_inputs(event=None):
 # --------------------- Histogram Visualization ---------------------
 
 
-def show_histogram_modal(original_hist, equalized_hist):
-    """Show histogram comparison in modal window"""
-    hist_window = customtkinter.CTkToplevel()
-    hist_window.title("Histogram Comparison")
-    hist_window.geometry("800x500")
-    hist_window.grab_set()
+def update_histogram_plots(original_hist, equalized_hist):
+    """Update histogram plots in the main GUI"""
+    # Clear previous plots
+    hist_ax1.clear()
+    hist_ax2.clear()
 
-    plt.style.use('dark_background')
-    fig = plt.figure(figsize=(8, 4), facecolor='#2b2b2b')
-    plt.subplots_adjust(wspace=0.3, left=0.1, right=0.95)
+    # Update plots
+    hist_ax1.bar(range(256), original_hist, width=1, color='#029cff')
+    hist_ax1.set_title("Original Histogram", color='white', fontsize=10)
+    hist_ax1.set_xlabel("Pixel Value", color='white')
+    hist_ax1.set_ylabel("Frequency", color='white')
+    hist_ax1.tick_params(colors='white')
+    hist_ax1.grid(True, color='#404040', alpha=0.3)
 
-    ax1 = fig.add_subplot(121)
-    ax1.bar(range(256), original_hist, width=1, color='#029cff')
-    ax1.set_title("Original Histogram", color='white', fontsize=10)
-    ax1.set_xlabel("Pixel Value", color='white')
-    ax1.set_ylabel("Frequency", color='white')
-    ax1.tick_params(colors='white')
-    ax1.grid(True, color='#404040', alpha=0.3)
+    hist_ax2.bar(range(256), equalized_hist, width=1, color="#ff7802")
+    hist_ax2.set_title("Equalized Histogram", color='white', fontsize=10)
+    hist_ax2.set_xlabel("Pixel Value", color='white')
+    hist_ax2.tick_params(colors='white')
+    hist_ax2.grid(True, color='#404040', alpha=0.3)
 
-    ax2 = fig.add_subplot(122)
-    ax2.bar(range(256), equalized_hist, width=1, color="#ff7802")
-    ax2.set_title("Equalized Histogram", color='white', fontsize=10)
-    ax2.set_xlabel("Pixel Value", color='white')
-    ax2.tick_params(colors='white')
-    ax2.grid(True, color='#404040', alpha=0.3)
-
-    canvas = FigureCanvasTkAgg(fig, master=hist_window)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
-
-    btn_close = customtkinter.CTkButton(
-        hist_window,
-        text="Close",
-        font=BODY_FONT,
-        command=lambda: [plt.close('all'), hist_window.destroy()]
-    )
-    btn_close.pack(pady=10)
+    # Redraw the canvas
+    hist_canvas.draw()
 
 # --------------------- Operation Handler ---------------------
 
@@ -569,6 +924,9 @@ def apply_operation():
     constant = constant_entry.get()
 
     try:
+        # Hide histogram frame initially
+        histogram_frame.grid_remove()
+
         if selected_group == "Select Category" or operation == "Select Operation":
             raise ValueError("Please select both a category and an operation")
 
@@ -576,39 +934,49 @@ def apply_operation():
             if "Images" in operation:
                 validate_two_images()
                 if operation == "Add Images":
-                    result = add_images()
+                    result = add_images(image1_array, image2_array)
                 elif operation == "Subtract Images":
-                    result = subtract_images()
+                    result = subtract_images(image1_array, image2_array)
             else:
                 validate_one_image()
                 op_type = operation.split()[0].lower()
                 if not constant:
                     raise ValueError("Constant value is required")
                 value = float(constant)
-                result = apply_constant_operation(op_type, value)
+                result = apply_constant_operation(image1_array, op_type, value)
 
         elif selected_group == "Logic":
-            result = logical_operation(operation)
+            validate_one_image()
+            if operation != "NOT":
+                validate_two_images()
+                result = logical_operation(
+                    image1_array, image2_array, operation)
+            else:
+                # For NOT, we only need one image
+                result = logical_operation(image1_array, None, operation)
 
         elif selected_group == "Geometric":
             validate_one_image()
             if operation == "Flip Horizontal":
-                result = flip_horizontal()
+                result = flip_horizontal(image1_array)
             elif operation == "Flip Vertical":
-                result = flip_vertical()
+                result = flip_vertical(image1_array)
 
         elif selected_group == "Color":
             validate_one_image()
             if operation == "RGB to Grayscale":
-                result = rgb_to_grayscale()
+                result = rgb_to_grayscale(image1_array)
             elif operation == "Thresholding":
                 if not constant:
                     raise ValueError("Threshold value is required")
                 threshold = int(constant)
-                result = threshold_image(threshold)
+                result = threshold_image(image1_array, threshold)
             elif operation == "Histogram Equalization":
-                result, orig_hist, eq_hist = histogram_equalization()
-                show_histogram_modal(orig_hist, eq_hist)
+                result, orig_hist, eq_hist = histogram_equalization(
+                    image1_array)
+                # Show and update histogram plots
+                histogram_frame.grid()
+                update_histogram_plots(orig_hist, eq_hist)
 
         elif selected_group == "Blending":
             validate_two_images()
@@ -616,49 +984,22 @@ def apply_operation():
                 if not constant:
                     raise ValueError("Alpha value is required")
                 alpha = float(constant)
-                result = linear_blend(alpha)
+                result = linear_blend(image1_array, image2_array, alpha)
             elif operation == "Average Images":
-                result = average_images()
+                result = average_images(image1_array, image2_array)
 
         elif selected_group == "Filters":
             validate_one_image()
             if not constant:
                 raise ValueError("Kernel size is required")
-
-            kernel_size = 3
-            order_rank = None
-            sigma = 1.0
-
-            if operation == "Gaussian Filter":
-                sigma = float(constant)
-                kernel_size = min(15, 2 * int(3 * sigma) + 1)
-            elif operation == "ORDER Filter":
-                parts = constant.split(',')
-                if len(parts) != 2:
-                    raise ValueError("Use 'kernel_size,rank' format")
-                kernel_size = int(parts[0])
-                order_rank = int(parts[1])
-            else:
-                kernel_size = int(constant)
+            kernel_size = int(constant)
 
             filter_type = operation.split()[0].lower()
             if filter_type == 'gaussian':
                 result = apply_gaussian_filter_manual(
-                    image1_array, sigma, kernel_size)
+                    image1_array, 1.0, kernel_size)
             else:
-                if len(image1_array.shape) == 3:
-                    filtered = np.zeros_like(image1_array)
-                    for c in range(3):
-                        filtered[:, :, c] = apply_filter(
-                            image1_array[:, :, c], kernel_size,
-                            filter_type, order_rank
-                        )
-                else:
-                    filtered = apply_filter(
-                        image1_array, kernel_size,
-                        filter_type, order_rank
-                    )
-                result = filtered.astype(np.uint8)
+                result = apply_filter(image1_array, kernel_size, filter_type)
 
         elif selected_group == "Morphological":
             validate_one_image()
@@ -686,12 +1027,28 @@ def apply_operation():
             elif operation == "Laplacian":
                 result = apply_laplacian(image1_array)
 
+        # Convert result to PIL image
+        height = len(result)
+        width = len(result[0])
+
+        # Flatten the 2D array to 1D list of pixels
+        pixels = []
+        for y in range(height):
+            for x in range(width):
+                pixel = result[y][x]
+                if isinstance(pixel, tuple):
+                    pixels.append(pixel)
+                else:
+                    # For grayscale, create RGB tuple
+                    pixels.append((pixel, pixel, pixel))
+
+        # Create PIL image
+        img = Image.new('RGB', (width, height))
+        img.putdata(pixels)
+        result_image = img
+
         # Display result
-        if len(result.shape) == 2:
-            result_image = Image.fromarray(result, 'L')
-        else:
-            result_image = Image.fromarray(result)
-        display_image(result_image, result_label)
+        display_image(img, result_label)
 
     except Exception as e:
         messagebox.showerror("Error", str(e))
@@ -749,9 +1106,13 @@ main_frame.grid(row=1, column=0, columnspan=4, padx=20, pady=20, sticky="nsew")
 main_frame.grid_rowconfigure(0, weight=1)
 main_frame.grid_columnconfigure(0, weight=1)
 
-# --------------------- Image Loading Section ---------------------
-load_frame = customtkinter.CTkFrame(main_frame)
-load_frame.pack(pady=10, fill="x")
+# --------------------- Top Section: Image Loading and Histograms ---------------------
+top_frame = customtkinter.CTkFrame(main_frame)
+top_frame.pack(fill='x', padx=10, pady=10)
+
+# Image Loading Section
+load_frame = customtkinter.CTkFrame(top_frame)
+load_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nw")
 
 btn_load1 = customtkinter.CTkButton(
     load_frame,
@@ -759,7 +1120,7 @@ btn_load1 = customtkinter.CTkButton(
     font=BODY_FONT,
     command=lambda: load_image(1)
 )
-btn_load1.grid(row=0, column=0, padx=10)
+btn_load1.pack(pady=5)
 
 btn_load2 = customtkinter.CTkButton(
     load_frame,
@@ -767,25 +1128,43 @@ btn_load2 = customtkinter.CTkButton(
     font=BODY_FONT,
     command=lambda: load_image(2)
 )
-btn_load2.grid(row=0, column=1, padx=10)
+btn_load2.pack(pady=5)
 
-# --------------------- Image Preview Section ---------------------
-image_frame = customtkinter.CTkFrame(main_frame)
-image_frame.pack(pady=20, fill="both", expand=True)
+# Image Preview Section
+image_frame = customtkinter.CTkFrame(top_frame)
+image_frame.grid(row=0, column=1, padx=10, pady=10)
 
 img1_label = customtkinter.CTkLabel(
     image_frame,
     text="Image 1 Preview",
     font=BODY_FONT
 )
-img1_label.grid(row=0, column=0, padx=20, sticky="nsew")
+img1_label.grid(row=0, column=0, padx=20, pady=5, sticky="nsew")
 
 img2_label = customtkinter.CTkLabel(
     image_frame,
     text="Image 2 Preview",
     font=BODY_FONT
 )
-img2_label.grid(row=0, column=1, padx=20, sticky="nsew")
+img2_label.grid(row=0, column=1, padx=20, pady=5, sticky="nsew")
+
+# --------------------- Histogram Section ---------------------
+histogram_frame = customtkinter.CTkFrame(top_frame)
+histogram_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
+histogram_frame.grid_remove()  # Initially hidden
+
+# Create matplotlib figure and axes
+plt.style.use('dark_background')
+hist_fig = plt.Figure(figsize=(6, 3), facecolor='#2b2b2b')
+hist_fig.subplots_adjust(wspace=0.3, left=0.1, right=0.95)
+
+hist_ax1 = hist_fig.add_subplot(121)
+hist_ax2 = hist_fig.add_subplot(122)
+
+# Create canvas for embedding in GUI
+hist_canvas = FigureCanvasTkAgg(hist_fig, master=histogram_frame)
+hist_canvas.draw()
+hist_canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 
 # --------------------- Operation Controls Section ---------------------
 controls_frame = customtkinter.CTkFrame(main_frame)
