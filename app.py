@@ -46,12 +46,13 @@ OPERATION_GROUPS = {
             "MIN Filter",
             "MEAN Filter",
             "MEDIAN Filter",
+            "ORDER Filter",
             "Conservative Smooth",
             "Gaussian Filter"
         ],
         "needs_constant": [
             "MAX Filter", "MIN Filter", "MEAN Filter", "MEDIAN Filter",
-            "Conservative Smooth", "Gaussian Filter"
+            "ORDER Filter", "Conservative Smooth", "Gaussian Filter"
         ]
     },
     "Edge Detection": {
@@ -211,56 +212,79 @@ def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
 
 def apply_prewitt(image):
     """Apply Prewitt edge detection operator"""
+    # Convert to grayscale if color image
+    if isinstance(image[0][0], tuple):
+        gray_image = rgb_to_grayscale(image)
+    else:
+        gray_image = image
+
     kernel_x = [[-1, 0, 1], [-1, 0, 1], [-1, 0, 1]]
     kernel_y = [[-1, -1, -1], [0, 0, 0], [1, 1, 1]]
 
-    grad_x = apply_kernel(image, kernel_x)
-    grad_y = apply_kernel(image, kernel_y)
+    grad_x = apply_kernel(gray_image, kernel_x)
+    grad_y = apply_kernel(gray_image, kernel_y)
 
-    height = len(image)
-    width = len(image[0])
+    height = len(gray_image)
+    width = len(gray_image[0])
     result = create_2d_array(width, height, 0)
 
     for y in range(height):
         for x in range(width):
             gradient = math.sqrt(grad_x[y][x]**2 + grad_y[y][x]**2)
-            result[y][x] = clip(int(gradient), 0, 255)
+            # Scale the gradient to make edges more visible
+            scaled_gradient = min(255, gradient * 3)
+            result[y][x] = clip(int(scaled_gradient), 0, 255)
 
     return result
 
 
 def apply_sobel(image):
     """Apply Sobel edge detection operator"""
+    # Convert to grayscale if color image
+    if isinstance(image[0][0], tuple):
+        gray_image = rgb_to_grayscale(image)
+    else:
+        gray_image = image
+
     kernel_x = [[1, 0, -1], [2, 0, -2], [1, 0, -1]]
     kernel_y = [[1, 2, 1], [0, 0, 0], [-1, -2, -1]]
 
-    grad_x = apply_kernel(image, kernel_x)
-    grad_y = apply_kernel(image, kernel_y)
+    grad_x = apply_kernel(gray_image, kernel_x)
+    grad_y = apply_kernel(gray_image, kernel_y)
 
-    height = len(image)
-    width = len(image[0])
+    height = len(gray_image)
+    width = len(gray_image[0])
     result = create_2d_array(width, height, 0)
 
     for y in range(height):
         for x in range(width):
             gradient = math.sqrt(grad_x[y][x]**2 + grad_y[y][x]**2)
-            result[y][x] = clip(int(gradient), 0, 255)
+            # Scale the gradient to make edges more visible
+            scaled_gradient = min(255, gradient * 3)
+            result[y][x] = clip(int(scaled_gradient), 0, 255)
 
     return result
 
 
 def apply_laplacian(image):
     """Apply Laplacian edge detection operator"""
-    kernel = [[0, 1, 0], [1, -4, 1], [0, 1, 0]]
-    laplacian = apply_kernel(image, kernel)
+    # Convert to grayscale if color image
+    if isinstance(image[0][0], tuple):
+        gray_image = rgb_to_grayscale(image)
+    else:
+        gray_image = image
 
-    height = len(image)
-    width = len(image[0])
+    kernel = [[0, 1, 0], [1, -4, 1], [0, 1, 0]]
+    laplacian = apply_kernel(gray_image, kernel)
+
+    height = len(gray_image)
+    width = len(gray_image[0])
     result = create_2d_array(width, height, 0)
 
     for y in range(height):
         for x in range(width):
-            result[y][x] = clip(abs(laplacian[y][x]), 0, 255)
+            # Take absolute value and scale
+            result[y][x] = clip(abs(laplacian[y][x]) * 2, 0, 255)
 
     return result
 
@@ -638,10 +662,10 @@ def yuv_to_rgb(yuv_image):
 # --------------------- Spatial Filters ---------------------
 
 
-def apply_filter(image, kernel_size, filter_type):
-    """Apply spatial filter to image"""
-    height = len(image)
-    width = len(image[0])
+def apply_filter(channel, kernel_size, filter_type, order_rank=None):
+    """Apply spatial filter to image channel"""
+    height = len(channel)
+    width = len(channel[0])
     k_half = kernel_size // 2
     result = create_2d_array(width, height, 0)
 
@@ -664,7 +688,7 @@ def apply_filter(image, kernel_size, filter_type):
                     if py >= height:
                         py = 2 * height - py - 1
 
-                    pixel = image[py][px]
+                    pixel = channel[py][px]
                     if isinstance(pixel, tuple):
                         # For RGB images, use luminance
                         pixel = 0.299 * pixel[0] + 0.587 * \
@@ -677,10 +701,16 @@ def apply_filter(image, kernel_size, filter_type):
             elif filter_type == 'min':
                 result[y][x] = min(window)
             elif filter_type == 'mean':
-                result[y][x] = sum(window) / len(window)
+                result[y][x] = int(sum(window) / len(window))
             elif filter_type == 'median':
                 window.sort()
                 result[y][x] = window[len(window)//2]
+            elif filter_type == 'order':
+                # ORDER filter (rank filter)
+                window.sort()
+                # Clamp rank to valid range
+                rank = min(max(order_rank, 0), len(window)-1)
+                result[y][x] = window[rank]
             elif filter_type == 'conservative':
                 min_val = min(window)
                 max_val = max(window)
@@ -696,8 +726,14 @@ def apply_filter(image, kernel_size, filter_type):
 
 def apply_morph_operation(image, kernel_size, operation):
     """Apply basic morphological operation (dilation/erosion)"""
-    height = len(image)
-    width = len(image[0])
+    # Convert to grayscale if color image
+    if isinstance(image[0][0], tuple):
+        gray_image = rgb_to_grayscale(image)
+    else:
+        gray_image = image
+
+    height = len(gray_image)
+    width = len(gray_image[0])
     k_half = kernel_size // 2
     result = create_2d_array(width, height, 0)
 
@@ -710,15 +746,17 @@ def apply_morph_operation(image, kernel_size, operation):
                     px = x + kx
                     py = y + ky
 
-                    # Handle boundaries with zero padding
-                    if 0 <= px < width and 0 <= py < height:
-                        pixel = image[py][px]
-                        if isinstance(pixel, tuple):
-                            # For RGB images, use luminance
-                            pixel = 0.299 * \
-                                pixel[0] + 0.587 * pixel[1] + 0.114 * pixel[2]
-                    else:
-                        pixel = 0
+                    # Handle boundaries with reflection
+                    if px < 0:
+                        px = -px
+                    if px >= width:
+                        px = 2 * width - px - 1
+                    if py < 0:
+                        py = -py
+                    if py >= height:
+                        py = 2 * height - py - 1
+
+                    pixel = gray_image[py][px]
                     window.append(pixel)
 
             # Apply operation
@@ -754,31 +792,25 @@ def apply_closing(image, kernel_size=3):
 
 def apply_contour(image, kernel_size=3):
     """Extract morphological contours"""
-    dilated = apply_dilation(image, kernel_size)
-    eroded = apply_erosion(image, kernel_size)
+    # Convert to grayscale if color image
+    if isinstance(image[0][0], tuple):
+        gray_image = rgb_to_grayscale(image)
+    else:
+        gray_image = image
 
-    height = len(image)
-    width = len(image[0])
+    dilated = apply_dilation(gray_image, kernel_size)
+    eroded = apply_erosion(gray_image, kernel_size)
+
+    height = len(gray_image)
+    width = len(gray_image[0])
     result = create_2d_array(width, height, 0)
 
     for y in range(height):
         for x in range(width):
-            # For RGB images, use luminance
-            orig = image[y][x]
-            if isinstance(orig, tuple):
-                orig = 0.299 * orig[0] + 0.587 * orig[1] + 0.114 * orig[2]
-
-            dil = dilated[y][x]
-            if isinstance(dil, tuple):
-                dil = 0.299 * dil[0] + 0.587 * dil[1] + 0.114 * dil[2]
-
-            ero = eroded[y][x]
-            if isinstance(ero, tuple):
-                ero = 0.299 * ero[0] + 0.587 * ero[1] + 0.114 * ero[2]
-
             # Contour = dilated - eroded
-            contour = dil - ero
-            result[y][x] = clip(int(contour), 0, 255)
+            contour = dilated[y][x] - eroded[y][x]
+            # Take absolute value to make contours visible
+            result[y][x] = clip(abs(contour), 0, 255)
 
     return result
 
@@ -992,14 +1024,83 @@ def apply_operation():
             validate_one_image()
             if not constant:
                 raise ValueError("Kernel size is required")
-            kernel_size = int(constant)
 
-            filter_type = operation.split()[0].lower()
-            if filter_type == 'gaussian':
+            kernel_size = 3
+            order_rank = None
+            sigma = 1.0
+
+            if operation == "Gaussian Filter":
+                sigma = float(constant)
+                kernel_size = min(15, 2 * int(3 * sigma) + 1)
                 result = apply_gaussian_filter_manual(
-                    image1_array, 1.0, kernel_size)
+                    image1_array, sigma, kernel_size)
+            elif operation == "ORDER Filter":
+                # Parse kernel size and rank from constant string
+                parts = constant.split(',')
+                if len(parts) != 2:
+                    raise ValueError("Use 'kernel_size,rank' format")
+                kernel_size = int(parts[0])
+                order_rank = int(parts[1])
+
+                # Apply ORDER filter
+                # Color image (3 channels)
+                if isinstance(image1_array[0][0], tuple):
+                    # For color images, apply to each channel
+                    height = len(image1_array)
+                    width = len(image1_array[0])
+                    # Create a 3D array for result: [height][width][3]
+                    result = create_3d_array(width, height, 3, 0)
+                    for c in range(3):
+                        # Extract channel
+                        channel = []
+                        for y in range(height):
+                            row = []
+                            for x in range(width):
+                                row.append(image1_array[y][x][c])
+                            channel.append(row)
+
+                        # Apply filter
+                        filtered = apply_filter(
+                            channel, kernel_size, 'order', order_rank)
+
+                        # Put back into result
+                        for y in range(height):
+                            for x in range(width):
+                                result[y][x][c] = filtered[y][x]
+                else:
+                    # Grayscale image
+                    result = apply_filter(
+                        image1_array, kernel_size, 'order', order_rank)
             else:
-                result = apply_filter(image1_array, kernel_size, filter_type)
+                kernel_size = int(constant)
+                filter_type = operation.split()[0].lower()
+
+                # Color image (3 channels)
+                if isinstance(image1_array[0][0], tuple):
+                    height = len(image1_array)
+                    width = len(image1_array[0])
+                    result = create_3d_array(width, height, 3, 0)
+                    for c in range(3):
+                        # Extract channel
+                        channel = []
+                        for y in range(height):
+                            row = []
+                            for x in range(width):
+                                row.append(image1_array[y][x][c])
+                            channel.append(row)
+
+                        # Apply filter
+                        filtered = apply_filter(
+                            channel, kernel_size, filter_type)
+
+                        # Put back into result
+                        for y in range(height):
+                            for x in range(width):
+                                result[y][x][c] = filtered[y][x]
+                else:
+                    # Grayscale image
+                    result = apply_filter(
+                        image1_array, kernel_size, filter_type)
 
         elif selected_group == "Morphological":
             validate_one_image()
@@ -1038,6 +1139,9 @@ def apply_operation():
                 pixel = result[y][x]
                 if isinstance(pixel, tuple):
                     pixels.append(pixel)
+                elif isinstance(pixel, list) and len(pixel) == 3:
+                    # For 3D array representation
+                    pixels.append(tuple(pixel))
                 else:
                     # For grayscale, create RGB tuple
                     pixels.append((pixel, pixel, pixel))
