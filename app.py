@@ -11,7 +11,6 @@ HEADER_FONT = (FONT_FAMILY, 14, "bold")
 SUBHEADER_FONT = (FONT_FAMILY, 12)
 BODY_FONT = (FONT_FAMILY, 12)
 
-# Operation groups structure
 OPERATION_GROUPS = {
     "Arithmetic": {
         "operations": [
@@ -77,34 +76,26 @@ OPERATION_GROUPS = {
 
 
 def clip(value, min_val, max_val):
-    """Clip value between min and max"""
     return min(max(value, min_val), max_val)
 
 
 def create_2d_array(width, height, default=0):
-    """Create a 2D array with given dimensions"""
     return [[default for _ in range(width)] for _ in range(height)]
 
 
 def create_3d_array(width, height, depth=3, default=0):
-    """Create a 3D array with given dimensions"""
     return [[[default for _ in range(depth)] for _ in range(width)] for _ in range(height)]
 
 
 def get_pixel(image, x, y):
-    """Get pixel value with boundary reflection"""
     height = len(image)
     width = len(image[0])
-
-    # Reflect boundaries
     x = max(0, min(x, width - 1))
     y = max(0, min(y, height - 1))
-
     return image[y][x]
 
 
 def apply_kernel(image, kernel):
-    """Apply kernel convolution to image"""
     height = len(image)
     width = len(image[0])
     k_height = len(kernel)
@@ -122,7 +113,6 @@ def apply_kernel(image, kernel):
                     px = x + kx - k_half_w
                     py = y + ky - k_half_h
 
-                    # Reflect boundaries
                     if px < 0:
                         px = -px
                     if px >= width:
@@ -134,7 +124,6 @@ def apply_kernel(image, kernel):
 
                     pixel = image[py][px]
                     if isinstance(pixel, tuple):
-                        # For RGB images, use luminance
                         pixel = 0.299 * pixel[0] + 0.587 * \
                             pixel[1] + 0.114 * pixel[2]
 
@@ -146,7 +135,6 @@ def apply_kernel(image, kernel):
 
 
 def sliding_window_view(image, kernel_size):
-    """Manual implementation of sliding window view"""
     height = len(image)
     width = len(image[0])
     k_half = kernel_size // 2
@@ -161,7 +149,6 @@ def sliding_window_view(image, kernel_size):
                     px = x + kx
                     py = y + ky
 
-                    # Reflect boundaries
                     if px < 0:
                         px = -px
                     if px >= width:
@@ -178,11 +165,9 @@ def sliding_window_view(image, kernel_size):
     return windows
 
 # ===================== IMAGE PROCESSING FUNCTIONS =====================
-# --------------------- Filter Functions ---------------------
 
 
 def create_gaussian_kernel(size, sigma):
-    """Create a Gaussian kernel for image filtering"""
     kernel = [[0.0] * size for _ in range(size)]
     center = size // 2
     sum_val = 0.0
@@ -194,7 +179,6 @@ def create_gaussian_kernel(size, sigma):
             kernel[i][j] = value
             sum_val += value
 
-    # Normalize kernel
     for i in range(size):
         for j in range(size):
             kernel[i][j] /= sum_val
@@ -203,7 +187,6 @@ def create_gaussian_kernel(size, sigma):
 
 
 def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
-    """Apply Gaussian filter to image"""
     kernel = create_gaussian_kernel(kernel_size, sigma)
     return apply_kernel(image, kernel)
 
@@ -211,8 +194,6 @@ def apply_gaussian_filter_manual(image, sigma=1.0, kernel_size=5):
 
 
 def apply_prewitt(image):
-    """Apply Prewitt edge detection operator"""
-    # Convert to grayscale if color image
     if isinstance(image[0][0], tuple):
         gray_image = rgb_to_grayscale(image)
     else:
@@ -231,7 +212,6 @@ def apply_prewitt(image):
     for y in range(height):
         for x in range(width):
             gradient = math.sqrt(grad_x[y][x]**2 + grad_y[y][x]**2)
-            # Scale the gradient to make edges more visible
             scaled_gradient = min(255, gradient * 3)
             result[y][x] = clip(int(scaled_gradient), 0, 255)
 
@@ -239,8 +219,6 @@ def apply_prewitt(image):
 
 
 def apply_sobel(image):
-    """Apply Sobel edge detection operator"""
-    # Convert to grayscale if color image
     if isinstance(image[0][0], tuple):
         gray_image = rgb_to_grayscale(image)
     else:
@@ -259,7 +237,6 @@ def apply_sobel(image):
     for y in range(height):
         for x in range(width):
             gradient = math.sqrt(grad_x[y][x]**2 + grad_y[y][x]**2)
-            # Scale the gradient to make edges more visible
             scaled_gradient = min(255, gradient * 3)
             result[y][x] = clip(int(scaled_gradient), 0, 255)
 
@@ -267,8 +244,6 @@ def apply_sobel(image):
 
 
 def apply_laplacian(image):
-    """Apply Laplacian edge detection operator"""
-    # Convert to grayscale if color image
     if isinstance(image[0][0], tuple):
         gray_image = rgb_to_grayscale(image)
     else:
@@ -283,7 +258,6 @@ def apply_laplacian(image):
 
     for y in range(height):
         for x in range(width):
-            # Take absolute value and scale
             result[y][x] = clip(abs(laplacian[y][x]) * 2, 0, 255)
 
     return result
@@ -292,7 +266,6 @@ def apply_laplacian(image):
 
 
 def add_images(img1, img2):
-    """Add two images pixel-wise"""
     height = len(img1)
     width = len(img1[0])
     result = create_2d_array(width, height, 0)
@@ -300,20 +273,17 @@ def add_images(img1, img2):
     for y in range(height):
         for x in range(width):
             if isinstance(img1[y][x], tuple) and isinstance(img2[y][x], tuple):
-                # RGB images
                 r = clip(img1[y][x][0] + img2[y][x][0], 0, 255)
                 g = clip(img1[y][x][1] + img2[y][x][1], 0, 255)
                 b = clip(img1[y][x][2] + img2[y][x][2], 0, 255)
                 result[y][x] = (r, g, b)
             else:
-                # Grayscale images
                 result[y][x] = clip(img1[y][x] + img2[y][x], 0, 255)
 
     return result
 
 
 def subtract_images(img1, img2):
-    """Subtract two images pixel-wise"""
     height = len(img1)
     width = len(img1[0])
     result = create_2d_array(width, height, 0)
@@ -321,20 +291,17 @@ def subtract_images(img1, img2):
     for y in range(height):
         for x in range(width):
             if isinstance(img1[y][x], tuple) and isinstance(img2[y][x], tuple):
-                # RGB images
                 r = clip(img1[y][x][0] - img2[y][x][0], 0, 255)
                 g = clip(img1[y][x][1] - img2[y][x][1], 0, 255)
                 b = clip(img1[y][x][2] - img2[y][x][2], 0, 255)
                 result[y][x] = (r, g, b)
             else:
-                # Grayscale images
                 result[y][x] = clip(img1[y][x] - img2[y][x], 0, 255)
 
     return result
 
 
 def apply_constant_operation(image, operation, value):
-    """Apply arithmetic operation with constant value"""
     height = len(image)
     width = len(image[0])
     result = create_2d_array(width, height, 0)
@@ -342,7 +309,6 @@ def apply_constant_operation(image, operation, value):
     for y in range(height):
         for x in range(width):
             if isinstance(image[y][x], tuple):
-                # RGB images
                 r, g, b = image[y][x]
                 if operation == 'add':
                     r = clip(r + value, 0, 255)
@@ -362,7 +328,6 @@ def apply_constant_operation(image, operation, value):
                     b = clip(b / value, 0, 255)
                 result[y][x] = (int(r), int(g), int(b))
             else:
-                # Grayscale images
                 if operation == 'add':
                     result[y][x] = clip(image[y][x] + value, 0, 255)
                 elif operation == 'subtract':
@@ -378,7 +343,6 @@ def apply_constant_operation(image, operation, value):
 
 
 def flip_horizontal(image):
-    """Flip image horizontally using array indexing"""
     height = len(image)
     width = len(image[0])
     result = create_2d_array(width, height, 0)
@@ -391,7 +355,6 @@ def flip_horizontal(image):
 
 
 def flip_vertical(image):
-    """Flip image vertically using array indexing"""
     height = len(image)
     width = len(image[0])
     result = create_2d_array(width, height, 0)
@@ -406,7 +369,6 @@ def flip_vertical(image):
 
 
 def rgb_to_grayscale(image):
-    """Convert RGB image to grayscale"""
     height = len(image)
     width = len(image[0])
     result = create_2d_array(width, height, 0)
@@ -421,7 +383,6 @@ def rgb_to_grayscale(image):
 
 
 def threshold_image(image, threshold):
-    """Apply thresholding to image"""
     height = len(image)
     width = len(image[0])
     result = create_2d_array(width, height, 0)
@@ -429,12 +390,10 @@ def threshold_image(image, threshold):
     for y in range(height):
         for x in range(width):
             if isinstance(image[y][x], tuple):
-                # For RGB images, convert to grayscale first
                 r, g, b = image[y][x]
                 gray = 0.299 * r + 0.587 * g + 0.114 * b
                 result[y][x] = 255 if gray > threshold else 0
             else:
-                # Grayscale images
                 result[y][x] = 255 if image[y][x] > threshold else 0
 
     return result
@@ -443,7 +402,6 @@ def threshold_image(image, threshold):
 
 
 def linear_blend(img1, img2, alpha):
-    """Linear blend of two images"""
     height = len(img1)
     width = len(img1[0])
     result = create_2d_array(width, height, 0)
@@ -451,7 +409,6 @@ def linear_blend(img1, img2, alpha):
     for y in range(height):
         for x in range(width):
             if isinstance(img1[y][x], tuple) and isinstance(img2[y][x], tuple):
-                # RGB images
                 r1, g1, b1 = img1[y][x]
                 r2, g2, b2 = img2[y][x]
                 r = alpha * r1 + (1 - alpha) * r2
@@ -459,21 +416,18 @@ def linear_blend(img1, img2, alpha):
                 b = alpha * b1 + (1 - alpha) * b2
                 result[y][x] = (int(r), int(g), int(b))
             else:
-                # Grayscale images
                 result[y][x] = alpha * img1[y][x] + (1 - alpha) * img2[y][x]
 
     return result
 
 
 def average_images(img1, img2):
-    """Average two images"""
     return linear_blend(img1, img2, 0.5)
 
 # --------------------- Logical Operations ---------------------
 
 
 def logical_operation(img1, img2, operation):
-    """Perform logical operation (AND, OR, XOR, NOT) using mathematical operations"""
     height = len(img1)
     width = len(img1[0])
     result = create_2d_array(width, height, 0)
@@ -481,7 +435,6 @@ def logical_operation(img1, img2, operation):
     for y in range(height):
         for x in range(width):
             if isinstance(img1[y][x], tuple):
-                # For RGB images, convert to grayscale first
                 r, g, b = img1[y][x]
                 val1 = 1 if (0.299 * r + 0.587 * g + 0.114 * b) > 127 else 0
             else:
@@ -512,7 +465,6 @@ def logical_operation(img1, img2, operation):
 
 
 def compute_histogram(image):
-    """Compute histogram for a 2D image array (grayscale)"""
     hist = [0] * 256
     height = len(image)
     width = len(image[0])
@@ -526,37 +478,28 @@ def compute_histogram(image):
 
 
 def histogram_equalization(image):
-    """Perform histogram equalization"""
-    # For color images, convert to YUV, equalize Y channel, then convert back
     if isinstance(image[0][0], tuple):
-        # Create grayscale version for histogram calculation
         gray_img = rgb_to_grayscale(image)
         orig_hist = compute_histogram(gray_img)
 
-        # Convert to YUV
         yuv = rgb_to_yuv(image)
         height = len(image)
         width = len(image[0])
 
-        # Extract Y channel
         y_channel = create_2d_array(width, height, 0.0)
         for y in range(height):
             for x in range(width):
                 y_channel[y][x] = yuv[y][x][0]
 
-        # Equalize Y channel
         eq_y, cdf_normalized = equalize_channel(y_channel)
 
-        # Create new YUV with equalized Y
         new_yuv = create_3d_array(width, height, 3, 0.0)
         for y in range(height):
             for x in range(width):
                 new_yuv[y][x] = (eq_y[y][x], yuv[y][x][1], yuv[y][x][2])
 
-        # Convert back to RGB
         equalized = yuv_to_rgb(new_yuv)
 
-        # Compute histogram for equalized Y channel
         eq_y_int = create_2d_array(width, height, 0)
         for y in range(height):
             for x in range(width):
@@ -565,19 +508,13 @@ def histogram_equalization(image):
 
         return equalized, orig_hist, eq_hist
     else:
-        # Grayscale image
         orig_hist = compute_histogram(image)
         equalized, cdf_normalized = equalize_channel(image)
-
-        # Compute histogram for equalized image
         eq_hist = compute_histogram(equalized)
-
         return equalized, orig_hist, eq_hist
 
 
 def equalize_channel(channel):
-    """Equalize single image channel"""
-    # Convert to integer values for histogram computation
     height = len(channel)
     width = len(channel[0])
     int_channel = create_2d_array(width, height, 0)
@@ -586,29 +523,23 @@ def equalize_channel(channel):
             int_val = int(round(channel[y][x]))
             int_channel[y][x] = clip(int_val, 0, 255)
 
-    # Compute histogram
     hist = compute_histogram(int_channel)
-
-    # Compute cumulative distribution
     cdf = [0] * 256
     cdf[0] = hist[0]
     for i in range(1, 256):
         cdf[i] = cdf[i-1] + hist[i]
 
-    # Find minimum non-zero CDF value
     cdf_min = next((val for val in cdf if val > 0), 0)
     cdf_max = cdf[-1]
 
-    # Normalize CDF
     cdf_normalized = [0] * 256
     if cdf_max - cdf_min > 0:
         for i in range(256):
             cdf_normalized[i] = int(
                 255 * (cdf[i] - cdf_min) / (cdf_max - cdf_min))
     else:
-        cdf_normalized = cdf  # Fallback for uniform images
+        cdf_normalized = cdf
 
-    # Apply equalization
     equalized = create_2d_array(width, height, 0)
     for y in range(height):
         for x in range(width):
@@ -621,7 +552,6 @@ def equalize_channel(channel):
 
 
 def rgb_to_yuv(rgb_image):
-    """Convert RGB image to YUV color space"""
     height = len(rgb_image)
     width = len(rgb_image[0])
     yuv = create_3d_array(width, height, 3, 0.0)
@@ -638,7 +568,6 @@ def rgb_to_yuv(rgb_image):
 
 
 def yuv_to_rgb(yuv_image):
-    """Convert YUV image back to RGB color space"""
     height = len(yuv_image)
     width = len(yuv_image[0])
     rgb = create_3d_array(width, height, 3, 0)
@@ -650,7 +579,6 @@ def yuv_to_rgb(yuv_image):
             g = y_val - 0.395 * u_val - 0.581 * v_val
             b = y_val + 2.032 * u_val
 
-            # Clip to valid RGB range
             r = clip(r, 0, 255)
             g = clip(g, 0, 255)
             b = clip(b, 0, 255)
@@ -663,7 +591,6 @@ def yuv_to_rgb(yuv_image):
 
 
 def apply_filter(channel, kernel_size, filter_type, order_rank=None):
-    """Apply spatial filter to image channel"""
     height = len(channel)
     width = len(channel[0])
     k_half = kernel_size // 2
@@ -671,14 +598,12 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
     for y in range(height):
         for x in range(width):
-            # Extract window
             window = []
             for ky in range(-k_half, k_half + 1):
                 for kx in range(-k_half, k_half + 1):
                     px = x + kx
                     py = y + ky
 
-                    # Reflect boundaries
                     if px < 0:
                         px = -px
                     if px >= width:
@@ -690,12 +615,10 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
                     pixel = channel[py][px]
                     if isinstance(pixel, tuple):
-                        # For RGB images, use luminance
                         pixel = 0.299 * pixel[0] + 0.587 * \
                             pixel[1] + 0.114 * pixel[2]
                     window.append(pixel)
 
-            # Apply filter
             if filter_type == 'max':
                 result[y][x] = max(window)
             elif filter_type == 'min':
@@ -706,9 +629,7 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
                 window.sort()
                 result[y][x] = window[len(window)//2]
             elif filter_type == 'order':
-                # ORDER filter (rank filter)
                 window.sort()
-                # Clamp rank to valid range
                 rank = min(max(order_rank, 0), len(window)-1)
                 result[y][x] = window[rank]
             elif filter_type == 'conservative':
@@ -725,8 +646,6 @@ def apply_filter(channel, kernel_size, filter_type, order_rank=None):
 
 
 def apply_morph_operation(image, kernel_size, operation):
-    """Apply basic morphological operation (dilation/erosion)"""
-    # Convert to grayscale if color image
     if isinstance(image[0][0], tuple):
         gray_image = rgb_to_grayscale(image)
     else:
@@ -739,14 +658,12 @@ def apply_morph_operation(image, kernel_size, operation):
 
     for y in range(height):
         for x in range(width):
-            # Extract window
             window = []
             for ky in range(-k_half, k_half + 1):
                 for kx in range(-k_half, k_half + 1):
                     px = x + kx
                     py = y + ky
 
-                    # Handle boundaries with reflection
                     if px < 0:
                         px = -px
                     if px >= width:
@@ -759,7 +676,6 @@ def apply_morph_operation(image, kernel_size, operation):
                     pixel = gray_image[py][px]
                     window.append(pixel)
 
-            # Apply operation
             if operation == 'dilation':
                 result[y][x] = max(window)
             elif operation == 'erosion':
@@ -769,30 +685,24 @@ def apply_morph_operation(image, kernel_size, operation):
 
 
 def apply_dilation(image, kernel_size=3):
-    """Apply morphological dilation"""
     return apply_morph_operation(image, kernel_size, 'dilation')
 
 
 def apply_erosion(image, kernel_size=3):
-    """Apply morphological erosion"""
     return apply_morph_operation(image, kernel_size, 'erosion')
 
 
 def apply_opening(image, kernel_size=3):
-    """Apply morphological opening (erosion followed by dilation)"""
     eroded = apply_erosion(image, kernel_size)
     return apply_dilation(eroded, kernel_size)
 
 
 def apply_closing(image, kernel_size=3):
-    """Apply morphological closing (dilation followed by erosion)"""
     dilated = apply_dilation(image, kernel_size)
     return apply_erosion(dilated, kernel_size)
 
 
 def apply_contour(image, kernel_size=3):
-    """Extract morphological contours"""
-    # Convert to grayscale if color image
     if isinstance(image[0][0], tuple):
         gray_image = rgb_to_grayscale(image)
     else:
@@ -807,9 +717,7 @@ def apply_contour(image, kernel_size=3):
 
     for y in range(height):
         for x in range(width):
-            # Contour = dilated - eroded
             contour = dilated[y][x] - eroded[y][x]
-            # Take absolute value to make contours visible
             result[y][x] = clip(abs(contour), 0, 255)
 
     return result
@@ -818,24 +726,20 @@ def apply_contour(image, kernel_size=3):
 
 
 def validate_one_image():
-    """Validate that image 1 is loaded"""
     if image1_array is None:
         raise ValueError("Load an image first")
 
 
 def validate_two_images():
-    """Validate that both images are loaded"""
     if image1_array is None or image2_array is None:
         raise ValueError("Load both images first")
     if len(image1_array) != len(image2_array) or len(image1_array[0]) != len(image2_array[0]):
         raise ValueError("Images must have same dimensions")
 
 # ===================== GUI FUNCTIONS =====================
-# --------------------- Image Handling ---------------------
 
 
 def load_image(img_num):
-    """Load image from file system"""
     global image1, image2, image1_array, image2_array
     file_path = filedialog.askopenfilename(filetypes=[
         ("Image Files", "*.bmp *.jpg *.png *.jpeg *.tif")
@@ -849,7 +753,6 @@ def load_image(img_num):
         width, height = img.size
         pixels = list(img.getdata())
 
-        # Convert to 2D list: image_array[y][x] = (r, g, b)
         img_array = []
         for y in range(height):
             row = []
@@ -872,7 +775,6 @@ def load_image(img_num):
 
 
 def display_image(img, label):
-    """Display image in GUI"""
     img.thumbnail((300, 300))
     photo = ImageTk.PhotoImage(img)
     label.configure(image=photo)
@@ -880,7 +782,6 @@ def display_image(img, label):
 
 
 def save_result():
-    """Save result image to file"""
     if result_image is None:
         messagebox.showwarning("Warning", "No result to save")
         return
@@ -898,7 +799,6 @@ def save_result():
 
 
 def update_operations_dropdown(selected_group):
-    """Update operations dropdown based on selected group"""
     operations = OPERATION_GROUPS[selected_group]["operations"]
     operations_dropdown.configure(values=operations)
     operations_dropdown.set(operations[0] if operations else "")
@@ -906,7 +806,6 @@ def update_operations_dropdown(selected_group):
 
 
 def toggle_inputs(event=None):
-    """Enable/disable input fields based on operation selection"""
     selected_group = groups_dropdown.get()
     selected_operation = operations_dropdown.get()
 
@@ -923,12 +822,9 @@ def toggle_inputs(event=None):
 
 
 def update_histogram_plots(original_hist, equalized_hist):
-    """Update histogram plots in the main GUI"""
-    # Clear previous plots
     hist_ax1.clear()
     hist_ax2.clear()
 
-    # Update plots
     hist_ax1.bar(range(256), original_hist, width=1, color='#029cff')
     hist_ax1.set_title("Original Histogram", color='white', fontsize=10)
     hist_ax1.set_xlabel("Pixel Value", color='white')
@@ -942,21 +838,18 @@ def update_histogram_plots(original_hist, equalized_hist):
     hist_ax2.tick_params(colors='white')
     hist_ax2.grid(True, color='#404040', alpha=0.3)
 
-    # Redraw the canvas
     hist_canvas.draw()
 
 # --------------------- Operation Handler ---------------------
 
 
 def apply_operation():
-    """Apply selected operation to images"""
     global result_image
     selected_group = groups_dropdown.get()
     operation = operations_dropdown.get()
     constant = constant_entry.get()
 
     try:
-        # Hide histogram frame initially
         histogram_frame.grid_remove()
 
         if selected_group == "Select Category" or operation == "Select Operation":
@@ -984,7 +877,6 @@ def apply_operation():
                 result = logical_operation(
                     image1_array, image2_array, operation)
             else:
-                # For NOT, we only need one image
                 result = logical_operation(image1_array, None, operation)
 
         elif selected_group == "Geometric":
@@ -1006,7 +898,6 @@ def apply_operation():
             elif operation == "Histogram Equalization":
                 result, orig_hist, eq_hist = histogram_equalization(
                     image1_array)
-                # Show and update histogram plots
                 histogram_frame.grid()
                 update_histogram_plots(orig_hist, eq_hist)
 
@@ -1035,23 +926,17 @@ def apply_operation():
                 result = apply_gaussian_filter_manual(
                     image1_array, sigma, kernel_size)
             elif operation == "ORDER Filter":
-                # Parse kernel size and rank from constant string
                 parts = constant.split(',')
                 if len(parts) != 2:
                     raise ValueError("Use 'kernel_size,rank' format")
                 kernel_size = int(parts[0])
                 order_rank = int(parts[1])
 
-                # Apply ORDER filter
-                # Color image (3 channels)
                 if isinstance(image1_array[0][0], tuple):
-                    # For color images, apply to each channel
                     height = len(image1_array)
                     width = len(image1_array[0])
-                    # Create a 3D array for result: [height][width][3]
                     result = create_3d_array(width, height, 3, 0)
                     for c in range(3):
-                        # Extract channel
                         channel = []
                         for y in range(height):
                             row = []
@@ -1059,29 +944,24 @@ def apply_operation():
                                 row.append(image1_array[y][x][c])
                             channel.append(row)
 
-                        # Apply filter
                         filtered = apply_filter(
                             channel, kernel_size, 'order', order_rank)
 
-                        # Put back into result
                         for y in range(height):
                             for x in range(width):
                                 result[y][x][c] = filtered[y][x]
                 else:
-                    # Grayscale image
                     result = apply_filter(
                         image1_array, kernel_size, 'order', order_rank)
             else:
                 kernel_size = int(constant)
                 filter_type = operation.split()[0].lower()
 
-                # Color image (3 channels)
                 if isinstance(image1_array[0][0], tuple):
                     height = len(image1_array)
                     width = len(image1_array[0])
                     result = create_3d_array(width, height, 3, 0)
                     for c in range(3):
-                        # Extract channel
                         channel = []
                         for y in range(height):
                             row = []
@@ -1089,16 +969,13 @@ def apply_operation():
                                 row.append(image1_array[y][x][c])
                             channel.append(row)
 
-                        # Apply filter
                         filtered = apply_filter(
                             channel, kernel_size, filter_type)
 
-                        # Put back into result
                         for y in range(height):
                             for x in range(width):
                                 result[y][x][c] = filtered[y][x]
                 else:
-                    # Grayscale image
                     result = apply_filter(
                         image1_array, kernel_size, filter_type)
 
@@ -1128,11 +1005,9 @@ def apply_operation():
             elif operation == "Laplacian":
                 result = apply_laplacian(image1_array)
 
-        # Convert result to PIL image
         height = len(result)
         width = len(result[0])
 
-        # Flatten the 2D array to 1D list of pixels
         pixels = []
         for y in range(height):
             for x in range(width):
@@ -1140,18 +1015,14 @@ def apply_operation():
                 if isinstance(pixel, tuple):
                     pixels.append(pixel)
                 elif isinstance(pixel, list) and len(pixel) == 3:
-                    # For 3D array representation
                     pixels.append(tuple(pixel))
                 else:
-                    # For grayscale, create RGB tuple
                     pixels.append((pixel, pixel, pixel))
 
-        # Create PIL image
         img = Image.new('RGB', (width, height))
         img.putdata(pixels)
         result_image = img
 
-        # Display result
         display_image(img, result_label)
 
     except Exception as e:
@@ -1159,14 +1030,12 @@ def apply_operation():
 
 
 # ===================== GUI SETUP =====================
-# Global variables
 image1 = None
 image2 = None
 result_image = None
 image1_array = None
 image2_array = None
 
-# Configure main window
 customtkinter.set_appearance_mode("dark")
 customtkinter.set_default_color_theme("dark-blue")
 
@@ -1214,7 +1083,6 @@ main_frame.grid_columnconfigure(0, weight=1)
 top_frame = customtkinter.CTkFrame(main_frame)
 top_frame.pack(fill='x', padx=10, pady=10)
 
-# Image Loading Section
 load_frame = customtkinter.CTkFrame(top_frame)
 load_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nw")
 
@@ -1234,7 +1102,6 @@ btn_load2 = customtkinter.CTkButton(
 )
 btn_load2.pack(pady=5)
 
-# Image Preview Section
 image_frame = customtkinter.CTkFrame(top_frame)
 image_frame.grid(row=0, column=1, padx=10, pady=10)
 
@@ -1252,12 +1119,10 @@ img2_label = customtkinter.CTkLabel(
 )
 img2_label.grid(row=0, column=1, padx=20, pady=5, sticky="nsew")
 
-# --------------------- Histogram Section ---------------------
 histogram_frame = customtkinter.CTkFrame(top_frame)
 histogram_frame.grid(row=0, column=2, padx=10, pady=10, sticky="nsew")
-histogram_frame.grid_remove()  # Initially hidden
+histogram_frame.grid_remove()
 
-# Create matplotlib figure and axes
 plt.style.use('dark_background')
 hist_fig = plt.Figure(figsize=(6, 3), facecolor='#2b2b2b')
 hist_fig.subplots_adjust(wspace=0.3, left=0.1, right=0.95)
@@ -1265,7 +1130,6 @@ hist_fig.subplots_adjust(wspace=0.3, left=0.1, right=0.95)
 hist_ax1 = hist_fig.add_subplot(121)
 hist_ax2 = hist_fig.add_subplot(122)
 
-# Create canvas for embedding in GUI
 hist_canvas = FigureCanvasTkAgg(hist_fig, master=histogram_frame)
 hist_canvas.draw()
 hist_canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
@@ -1274,7 +1138,6 @@ hist_canvas.get_tk_widget().pack(fill='both', expand=True, padx=10, pady=10)
 controls_frame = customtkinter.CTkFrame(main_frame)
 controls_frame.pack(pady=10, fill="x")
 
-# Operation category dropdown
 groups_dropdown = customtkinter.CTkOptionMenu(
     controls_frame,
     font=BODY_FONT,
@@ -1284,7 +1147,6 @@ groups_dropdown = customtkinter.CTkOptionMenu(
 groups_dropdown.set("Select Category")
 groups_dropdown.pack(side="left", padx=5)
 
-# Operation selection dropdown
 operations_dropdown = customtkinter.CTkOptionMenu(
     controls_frame,
     font=BODY_FONT,
@@ -1294,7 +1156,6 @@ operations_dropdown = customtkinter.CTkOptionMenu(
 operations_dropdown.set("Select Operation")
 operations_dropdown.pack(side="left", padx=5)
 
-# Parameter input field
 constant_frame = customtkinter.CTkFrame(controls_frame)
 constant_frame.pack(side="left", padx=5)
 
@@ -1313,7 +1174,6 @@ constant_entry = customtkinter.CTkEntry(
 )
 constant_entry.pack(side="left", padx=5)
 
-# Apply operation button
 btn_apply = customtkinter.CTkButton(
     controls_frame,
     text="Apply Operation",
@@ -1333,7 +1193,6 @@ result_label = customtkinter.CTkLabel(
 )
 result_label.pack(expand=True)
 
-# Save result button
 btn_save = customtkinter.CTkButton(
     result_frame,
     text="Save Result",
@@ -1343,7 +1202,6 @@ btn_save = customtkinter.CTkButton(
 btn_save.pack(pady=10)
 
 # ===================== APPLICATION INITIALIZATION =====================
-# Initialize dropdowns and start main loop
 update_operations_dropdown(list(OPERATION_GROUPS.keys())[0])
 toggle_inputs()
 root.mainloop()

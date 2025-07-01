@@ -125,6 +125,10 @@ Open the file 'app.exe' on the 'dist' folder.
 
 ---
 
+## Repository
+
+GitHub repository: https://github.com/luisrefatti/proc-img
+
 ## License
 
 This project was developed for educational purposes.  
