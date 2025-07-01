@@ -86,10 +86,46 @@ The application supports a wide range of image processing operations, categorize
 - `tkinter` – GUI toolkit  
 - `customtkinter` – Modern tkinter widgets  
 - `Pillow (PIL)` – Image manipulation  
-- `matplotlib` – Histogram plotting  
+- `matplotlib` – Histogram plotting
+- `pyinstaller` – Running the app 
 
 ---
 
 ## Usage
 
 Open the file 'app.exe' on the 'dist' folder.
+
+### 1. Load images
+
+- Click **"Load Image 1"** to load the primary image.  
+- Click **"Load Image 2"** if the selected operation requires two images (e.g., *Add Images*, *Linear Blend*, *AND*).  
+
+### 2. Select operation
+
+- Choose a **Category** from the first dropdown (e.g., *Arithmetic*, *Color*, *Filters*).  
+- Select an **Operation** from the second dropdown.  
+
+### 3. Enter constant value (if required)
+
+- If the selected operation needs a value (e.g., *Add Constant*, *Thresholding*), a field will become active.  
+- Enter the desired number.  
+
+### 4. Apply operation
+
+- Click the **"Apply Operation"** button.  
+
+### 5. View result
+
+- The processed image will be shown in the **"Result Image"** panel.  
+- For **Histogram Equalization**, both original and equalized histograms will be displayed.  
+
+### 6. Save result
+
+- Click **"Save Result"** to download the processed image.  
+
+---
+
+## License
+
+This project was developed for educational purposes.  
+Feel free to use, modify, and distribute it with proper attribution.
